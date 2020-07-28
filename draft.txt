@@ -1,0 +1,34 @@
+
+
+initial asserts
+
+set ranks per face
+
+reconsider: split communicator into six faces
+
+reconsider: establish intercommunicators
+but: Rewrite Partionioner to accept slice of ranks, do away w/ scatter, gather
+
+per face: Partitioner
+
+per face: set up grids
+
+per face: save initial in_fields
+
+barrier
+
+apply diffusion loop:
+    exchange halo: care about corners: would be 8 messages
+    (4 way update, interleave computation)
+    barrier
+
+per face: save final outgrid
+
+wind down
+
+
+
+
+validation: fill grid with (f, x, y), do halo update, check value
+
+
