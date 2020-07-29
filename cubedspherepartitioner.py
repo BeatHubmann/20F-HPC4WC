@@ -8,17 +8,17 @@ class CubedSpherePartitioner(object):
       Fixed cube tile (facet) numbering:
           |-----|
           |     |
-          |  3  |
-          |     ^
-    |->---|---<-|-----|->---|
-    v     |     |     v     |
-    |  5  |  1  |  2  |  4  |
-    |     ^     ^     |     |
-    |-----|->---|->---|-----| 
+          |  3  ^
+          |     x
+    |y>---|---<y|-----|y>---|
+    x     |     |     x     |
+    v  5  ^  1  ^  2  v  4  |
+    |     y     y     |     |
+    |-----|x>---|x>---|-----| 
           |     |
-          |  6  |
-          ^     |
-          |->---|
+          ^  6  |
+          y     |
+          |x>---|
     """
 
     def __init__(self, comm, domain, num_halo):
@@ -40,53 +40,35 @@ class CubedSpherePartitioner(object):
             "Number of ranks per face must be square number"
         
         self.__ranks_per_tile = self.__num_ranks // 6
+        self.__ranks_per_axis = int(math.sqrt(self.__ranks_per_tile))
 
-        self.__global_shape = [domain[0], domain[1] + 2 * num_halo, domain[2] + 2 * num_halo]
-
-        # Hard-coded: Cube tile arrangement:
-        # Usage: tile: [k: integer: neighbor tile in given 'direction',
-        #               m: integer: number positive 90 degree coordinate rotations]
-        self.__tile_neighbors = {1: {'U': [3, 3], 'D': [6, 0], 'L': [5, 1], 'R': [2, 0]},
-                                 2: {'U': [3, 0], 'D': [6, 3], 'L': [1, 0], 'R': [4, 1]},
-                                 3: {'U': [5, 3], 'D': [2, 0], 'L': [1, 1], 'R': [4, 0]},
-                                 4: {'U': [5, 0], 'D': [2, 3], 'L': [3, 0], 'R': [6, 1]},
-                                 5: {'U': [1, 3], 'D': [4, 0], 'L': [3, 1], 'R': [6, 0]},
-                                 6: {'U': [1, 0], 'D': [4, 3], 'L': [5, 0], 'R': [2, 1]}}
-
-        # Some sanity checks (comment out for production)
-        assert self.__tile_neighbors[1]['L'][0] == self.__tile_neighbors[6]['L'][0] == self.__tile_neighbors[4]['U'][0], 'Cube geometry faulty'
-        assert self.__tile_neighbors[6]['D'][0] == self.__tile_neighbors[2]['R'][0] == self.__tile_neighbors[3]['R'][0], 'Cube geometry faulty' 
-        assert self.__tile_neighbors[3]['U'][0] == self.__tile_neighbors[6]['L'][0] == self.__tile_neighbors[1]['L'][0], 'Cube geometry faulty'
-        for i in range(6):
-            rotation_sum = 0
-            [rotation_sum := rotation_sum + k[1] for v, k in self.__tile_neighbors[i+1].items()]
-            assert rotation_sum == 4, 'Cube geometry faulty' 
-
-
-        # Hard-coded: Array of 2D rotation matrices in positive 90 degree steps (0, 90, 180, 270):
-        self.__rotate_90_deg = np.asarray([ [[ 1, 0],
-                                             [ 0, 1]],
-                                            [[ 0, 1],
-                                             [-1, 0]],
-                                            [[-1, 0],
-                                             [ 0,-1]],
-                                            [[ 0,-1],
-                                             [ 1, 0]] ])
+        self.__local_rank = self.__rank_global2local()
 
         self.__rank2tile, \
         self.__tile2ranks, \
         self.__tile2root = self.__assign_ranks_tiles(self.__num_ranks, self.__ranks_per_tile)
 
-        self.__tile = self.__rank2tile[self.__global_rank] # Attention: 1-based numbering in accordance with cube topology
-        
-        self.__local_rank = self.__rank_global2local()
+        self.__tile = self.__rank2tile[self.__global_rank] # 1-based tile numbering according with cube topology specification
 
+        self.__tile_neighbors = self.__assign_tile_neighbors()
 
-        size = self.__setup_grid()
+        self.__rank_grid = self.__assign_rank_grid(self.__tile2ranks, self.__ranks_per_axis)
 
-        assert domain[1] >= size[0] and domain[2] >= size[1], "Domain is too small for number of ranks"
+        self.__rank_neighbors = self.__assign_rank_neighbors(self.__global_rank,
+                                                              self.__rank_grid,
+                                                              self.__tile,
+                                                              self.__tile_neighbors)        
+
+        self.__global_shape = [domain[0], domain[1] + 2 * num_halo, domain[2] + 2 * num_halo]
+
+        self.__size = self.__setup_grid()
+
+        assert domain[1] >= self.__size[0] and domain[2] >= self.__size[1], "Domain is too small for number of ranks"
         
         self.__setup_domain(domain, num_halo)
+
+
+
 
 
 
@@ -112,9 +94,65 @@ class CubedSpherePartitioner(object):
         return rank2tile, tile2ranks, tile2root
     
 
+    def __assign_tile_neighbors(self):
+        """Return dictionary: tile, direction->neighbor tile, number of relative positive 90 degree coordinate rotations"""
+        tile_neighbors = {1: {'U': [3, 1], 'D': [6, 0], 'L': [5, 3], 'R': [2, 0]},
+                          2: {'U': [3, 0], 'D': [6, 1], 'L': [1, 0], 'R': [4, 3]},
+                          3: {'U': [5, 1], 'D': [2, 0], 'L': [1, 3], 'R': [4, 0]},
+                          4: {'U': [5, 0], 'D': [2, 1], 'L': [3, 0], 'R': [6, 3]},
+                          5: {'U': [1, 1], 'D': [4, 0], 'L': [3, 3], 'R': [6, 0]},
+                          6: {'U': [1, 0], 'D': [4, 1], 'L': [5, 0], 'R': [2, 3]}}
 
+        # Sanity checks (comment out for production) ----------
+        assert tile_neighbors[1]['L'][0] == tile_neighbors[6]['L'][0] == tile_neighbors[4]['U'][0], 'Cube geometry faulty'
+        assert tile_neighbors[6]['D'][0] == tile_neighbors[2]['R'][0] == tile_neighbors[3]['R'][0], 'Cube geometry faulty' 
+        assert tile_neighbors[3]['U'][0] == tile_neighbors[6]['L'][0] == tile_neighbors[1]['L'][0], 'Cube geometry faulty'
+        for i in range(6):
+            rotation_sum = 0
+            [rotation_sum := rotation_sum + k[1] for v, k in tile_neighbors[i+1].items()]
+            assert rotation_sum == 4, 'Cube geometry faulty' 
+        # End sanity checks------------------------------------
 
+        return tile_neighbors
 
+    def __assign_rank_grid(self, tile2ranks, ranks_per_axis):
+        """Return array containing all tiles' placements of global ranks"""
+        rotations = [0, 0, 1, 3, 3, 0] # number of positive 90deg rotations of tile coordinates relative to tile #1 x-y axes
+        return np.asarray([np.rot90(np.flipud(np.asarray(tile2ranks[i+1]).reshape(ranks_per_axis, -1)), rotations[i]) \
+             for i in range(6)])
+
+    def __assign_rank_neighbors(self, global_rank, rank_grid, tile, tile_neighbors):
+        """Return dictionary: global rank->global neighbor ranks"""
+        # my_grid = rank_grid[tile-1] # tile numbering is 1-based
+
+        up_tile, down_tile = tile_neighbors[tile]['U'][0], tile_neighbors[tile]['D'][0] 
+        # up_grid, down_grid = rank_grid[[up_tile-1, down_tile-1]] # tile numbering is 1-based
+        # up_down_grid = np.vstack((up_grid, my_grid, down_grid))
+        up_down_grid = np.vstack((rank_grid[[up_tile-1, tile-1, down_tile-1]])) # tile numbering is 1-based
+
+        left_tile, right_tile = tile_neighbors[tile]['L'][0], tile_neighbors[tile]['R'][0] 
+        # left_grid, right_grid = rank_grid[[left_tile-1, right_tile-1]] # tile numbering is 1-based
+        # left_right_grid = np.hstack((left_grid, my_grid, right_grid))
+        left_right_grid = np.hstack((rank_grid[[left_tile-1, tile-1, right_tile-1]])) # tile numbering is 1-based
+
+        y_up_down_grid, x_up_down_grid = np.where(up_down_grid == global_rank)
+        y_left_right_grid, x_left_right_grid = np.where(left_right_grid == global_rank)
+        
+        return {'U': up_down_grid[(y_up_down_grid-1, x_up_down_grid)].item(),
+                'D': up_down_grid[(y_up_down_grid+1, x_up_down_grid)].item(),
+                'L': left_right_grid[(y_left_right_grid, x_left_right_grid-1)].item(),
+                'R': left_right_grid[(y_left_right_grid, x_left_right_grid+1)].item()}
+
+    def __define_rotations(self):
+        """Return array of of 2D rotation matrices in positive 90 degree steps (0, 90, 180, 270)"""
+        return np.asarray([ [[ 1, 0],
+                             [ 0, 1]],
+                            [[ 0, 1],
+                             [-1, 0]],
+                            [[-1, 0],
+                             [ 0,-1]],
+                            [[ 0,-1],
+                             [ 1, 0]] ])
         
     def comm(self):
         """Returns the MPI communicator use to setup this partitioner"""
@@ -125,7 +163,6 @@ class CubedSpherePartitioner(object):
         """Returns the number of halo points"""
         return self.__num_halo
     
-        
     def global_rank(self):
         """Returns the global rank of the current MPI worker"""
         return self.__global_rank
@@ -142,41 +179,33 @@ class CubedSpherePartitioner(object):
         """Returns the shape of a local field (including halo points)"""
         return self.__shape
     
-    
-    
     def global_shape(self):
-        """Returns the shape of a local field (including halo points)"""
+        """Returns the shape of a global tile field (including halo points)"""
         return self.__global_shape
-    
 
     def size(self):
         """Dimensions of the two-dimensional worker grid"""
-        return self.__size
-    
+        return self.__size    
     
     def position(self):
         """Position of current rank on two-dimensional worker grid"""
-        return self.__rank_to_position(self.__rank)
-
+        return self.__rank_to_position(self.__local_rank)
 
     def left(self):
         """Returns the rank of the left neighbor"""
-        return self.__get_neighbor_rank( [0, -1] )
-    
+        return self.__rank_neighbors['L']
     
     def right(self):
-        """Returns the rank of the left neighbor"""
-        return self.__get_neighbor_rank( [0, +1] )
-    
+        """Returns the rank of the right neighbor"""
+        return self.__rank_neighbors['R']
     
     def top(self):
-        """Returns the rank of the left neighbor"""
-        return self.__get_neighbor_rank( [+1, 0] )
-    
+        """Returns the rank of the top/up neighbor"""
+        return self.__rank_neighbors['U']
     
     def bottom(self):
-        """Returns the rank of the left neighbor"""
-        return self.__get_neighbor_rank( [-1, 0] )
+        """Returns the rank of the bottom/down neighbor"""
+        return self.__rank_neighbors['D']
     
     
     # def scatter(self, field, root=0):
@@ -235,8 +264,7 @@ class CubedSpherePartitioner(object):
         for ranks_x in range(math.floor( math.sqrt(self.__ranks_per_tile) ), 0, -1):
             if self.__ranks_per_tile % ranks_x == 0:
                 break
-        self.__size = (self.__ranks_per_tile // ranks_x, ranks_x)
-        return self.__size
+        return (self.__ranks_per_tile // ranks_x, ranks_x)
     
 
     def __ranks_per_face(self):
@@ -244,23 +272,23 @@ class CubedSpherePartitioner(object):
         return self.__ranks_per_face
 
 
-    def __get_neighbor_rank(self, offset):
-        """Get the rank ID of a neighboring rank at a certain offset relative to the current rank"""
-        position = self.__rank_to_position(self.__rank)
-        pos_y = self.__cyclic_offset(position[0], offset[0], self.__size[0], self.__periodic[0])
-        pos_x = self.__cyclic_offset(position[1], offset[1], self.__size[1], self.__periodic[1])
-        return self.__position_to_rank( [pos_y, pos_x] )
+    # def __get_neighbor_rank(self, offset):
+    #     """Get the rank ID of a neighboring rank at a certain offset relative to the current rank"""
+    #     position = self.__rank_to_position(self.__rank)
+    #     pos_y = self.__cyclic_offset(position[0], offset[0], self.__size[0], self.__periodic[0])
+    #     pos_x = self.__cyclic_offset(position[1], offset[1], self.__size[1], self.__periodic[1])
+    #     return self.__position_to_rank( [pos_y, pos_x] )
 
 
-    def __cyclic_offset(self, position, offset, size, periodic=True):
-        """Add offset with cyclic boundary conditions"""
-        pos = position + offset
-        if periodic:
-            while pos < 0:
-                pos += size
-            while pos > size - 1:
-                pos -= size
-        return pos if -1 < pos < size else None
+    # def __cyclic_offset(self, position, offset, size, periodic=True):
+    #     """Add offset with cyclic boundary conditions"""
+    #     pos = position + offset
+    #     if periodic:
+    #         while pos < 0:
+    #             pos += size
+    #         while pos > size - 1:
+    #             pos -= size
+    #     return pos if -1 < pos < size else None
 
 
     def __setup_domain(self, shape, num_halo):
@@ -275,7 +303,7 @@ class CubedSpherePartitioner(object):
 
         domains = []
         shapes = []
-        for rank in range(self.__num_ranks):
+        for rank in range(self.__ranks_per_tile):
             pos = self.__rank_to_position(rank)
             domains += [[ pos_y[pos[0]] - num_halo, pos_x[pos[1]] - num_halo, \
                           pos_y[pos[0] + 1] + num_halo, pos_x[pos[1] + 1] + num_halo ]]
@@ -283,7 +311,7 @@ class CubedSpherePartitioner(object):
                                  domains[rank][3] - domains[rank][1] ]]
         self.__domains, self.__shapes =  domains, shapes
         
-        self.__domain, self.__shape = domains[self.__rank], shapes[self.__rank]
+        self.__domain, self.__shape = domains[self.__local_rank], shapes[self.__local_rank]
         self.__max_shape = self.__find_max_shape( self.__shapes )
 
 
@@ -315,22 +343,17 @@ class CubedSpherePartitioner(object):
         return max_shape
     
 
-    def __rank_to_position(self, rank):
+    def __rank_to_position(self, local_rank):
         """Find position of rank on worker grid"""
-        return ( rank // self.__size[1], rank % self.__size[1] )
+        # sanity check ---------
+        assert ( local_rank // self.__size[1], local_rank % self.__size[1] ) == np.where(self.__rank_grid[self.__tile-1] == self.__global_rank), \
+            'Check rank numbering consistency'
+        # ----------------------
+        return ( local_rank // self.__size[1], local_rank % self.__size[1] )
     
-
     def __position_to_rank(self, position):
         """Find rank given a position on the worker grid"""
         if position[0] is None or position[1] is None:
             return None
         else:
             return position[0] * self.__size[1] + position[1]
-    
-
-    # def __my_pos(self, rank, num_ranks):
-    #     return (rank // self.ranks_per_face(),
-    #             rank // self.size()[1],
-    #             rank % self.size()[1])
-
-
