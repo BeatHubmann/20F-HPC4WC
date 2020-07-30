@@ -35,8 +35,8 @@ class CubedSpherePartitioner(object):
         self.__global_rank = comm.Get_rank()
         self.__num_ranks = comm.Get_size()
 
-        assert self.__num_ranks() % 6 == 0, "Number of ranks must be multiple of 6"
-        assert math.sqrt(self.__num_ranks() / 6).is_integer(), \
+        assert self.__num_ranks % 6 == 0, "Number of ranks must be multiple of 6"
+        assert math.sqrt(self.__num_ranks / 6).is_integer(), \
             "Number of ranks per face must be square number"
         
         self.__ranks_per_tile = self.__num_ranks // 6
@@ -181,7 +181,7 @@ class CubedSpherePartitioner(object):
 
     def tile_root(self):
         """Returns the global MPI rank which is root rank of the tile of the current MPI worker"""
-        return self.__tile2root(self.__tile)
+        return self.__tile2root[self.__tile]
 
     def shape(self):
         """Returns the shape of a local field (including halo points)"""
