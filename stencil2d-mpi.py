@@ -15,7 +15,6 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from mpi4py import MPI
 from partitioner import Partitioner
-from cubedspherepartitioner import CubedSpherePartitioner
 
 
 def laplacian( in_field, lap_field, num_halo, extend=0 ):

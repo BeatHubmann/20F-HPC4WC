@@ -101,13 +101,13 @@ class CubedSpherePartitioner(object):
                           6: {'U': [1, 0], 'D': [4, 1], 'L': [5, 0], 'R': [2, 3]}}
 
         # Sanity checks (comment out for production) ----------
-        assert tile_neighbors[1]['L'][0] == tile_neighbors[6]['L'][0] == tile_neighbors[4]['U'][0], 'Cube geometry faulty'
-        assert tile_neighbors[6]['D'][0] == tile_neighbors[2]['R'][0] == tile_neighbors[3]['R'][0], 'Cube geometry faulty' 
-        assert tile_neighbors[3]['U'][0] == tile_neighbors[6]['L'][0] == tile_neighbors[1]['L'][0], 'Cube geometry faulty'
-        for i in range(6):
-            rotation_sum = 0
-            [rotation_sum := rotation_sum + k[1] for v, k in tile_neighbors[i+1].items()]
-            assert rotation_sum == 4, 'Cube geometry faulty' 
+        # assert tile_neighbors[1]['L'][0] == tile_neighbors[6]['L'][0] == tile_neighbors[4]['U'][0], 'Cube geometry faulty'
+        # assert tile_neighbors[6]['D'][0] == tile_neighbors[2]['R'][0] == tile_neighbors[3]['R'][0], 'Cube geometry faulty' 
+        # assert tile_neighbors[3]['U'][0] == tile_neighbors[6]['L'][0] == tile_neighbors[1]['L'][0], 'Cube geometry faulty'
+        # for i in range(6):
+        #     rotation_sum = 0
+        #     [rotation_sum := rotation_sum + k[1] for v, k in tile_neighbors[i+1].items()]
+        #     assert rotation_sum == 4, 'Cube geometry faulty' 
         # End sanity checks------------------------------------
 
         return tile_neighbors
