@@ -50,14 +50,15 @@ class CubedSpherePartitioner(object):
 
         self.__tile = self.__rank2tile[self.__global_rank] # 1-based tile numbering according with cube topology specification
 
+        self.__tile_root = self.tile_root()
+
         self.__tile_neighbors = self.__assign_tile_neighbors()
 
-        self.__rank_grid = self.__assign_rank_grid(self.__tile2ranks, self.__ranks_per_axis)
+        self.__tile_comm = self.__split_tile_comm(self.__comm, self.__tile, self.__global_rank)
 
-        self.__rank_neighbors = self.__assign_rank_neighbors(self.__global_rank,
-                                                              self.__rank_grid,
-                                                              self.__tile,
-                                                              self.__tile_neighbors)        
+        self.__rank_grid = self.__assign_rank_grid(self.__tile, self.__tile2ranks, self.__tile_neighbors, self.__ranks_per_axis)
+
+        self.__rank_neighbors = self.__assign_rank_neighbors(self.__global_rank, self.__rank_grid, self.__tile)
 
         self.__global_shape = [domain[0], domain[1] + 2 * num_halo, domain[2] + 2 * num_halo]
 
@@ -82,15 +83,11 @@ class CubedSpherePartitioner(object):
 
     def __assign_ranks_tiles(self, num_ranks, ranks_per_tile):
         """Return dictionaries: rank->tile, tile->[ranks], tile->root rank"""
-        
-        rank2tile = {i: (i // ranks_per_tile) + 1 for i in range(num_ranks)}
-        
+        rank2tile = {i: (i // ranks_per_tile) + 1 for i in range(num_ranks)} # 1-based tile numbering
         tile2ranks = dict()
         for k, v in rank2tile.items():
             tile2ranks.setdefault(v, list()).append(k)
-
         tile2root = {v: k[0] for v, k in tile2ranks.items()}
-
         return rank2tile, tile2ranks, tile2root
     
 
@@ -115,29 +112,23 @@ class CubedSpherePartitioner(object):
 
         return tile_neighbors
 
-    def __assign_rank_grid(self, tile2ranks, ranks_per_axis):
-        """Return array containing all tiles' placements of global ranks"""
-        rotations = [0, 0, 1, 3, 3, 0] # number of positive 90deg rotations of tile coordinates relative to tile #1 x-y axes
-        return np.asarray([np.rot90(np.flipud(np.asarray(tile2ranks[i+1]).reshape(ranks_per_axis, -1)), rotations[i]) \
-             for i in range(6)])
+    def __calculate_rank_grid(self, tile, tile2ranks, ranks_per_axis, rotation=0):
+            """Return rotated array containing square grid of tile's global ranks"""
+            return np.rot90(np.flipud(np.asarray(tile2ranks[tile]).reshape(ranks_per_axis, -1)), rotation)
 
-    def __assign_rank_neighbors(self, global_rank, rank_grid, tile, tile_neighbors):
+    def __assign_rank_grid(self, tile, tile2ranks, tile_neighbors, ranks_per_axis):
+        """Return dictionary of arrays containing all neighboring tiles' placements of global ranks"""
+        rank_grid = {tile: self.__calculate_rank_grid(tile, tile2ranks, ranks_per_axis)}
+        for k, v in tile_neighbors[tile].items():
+            rank_grid[k] = self.__calculate_rank_grid(v[0], tile2ranks, ranks_per_axis, v[1])
+        return rank_grid
+
+    def __assign_rank_neighbors(self, global_rank, rank_grid, tile):
         """Return dictionary: global rank->global neighbor ranks"""
-        # my_grid = rank_grid[tile-1] # tile numbering is 1-based
-
-        up_tile, down_tile = tile_neighbors[tile]['U'][0], tile_neighbors[tile]['D'][0] 
-        # up_grid, down_grid = rank_grid[[up_tile-1, down_tile-1]] # tile numbering is 1-based
-        # up_down_grid = np.vstack((up_grid, my_grid, down_grid))
-        up_down_grid = np.vstack((rank_grid[[up_tile-1, tile-1, down_tile-1]])) # tile numbering is 1-based
-
-        left_tile, right_tile = tile_neighbors[tile]['L'][0], tile_neighbors[tile]['R'][0] 
-        # left_grid, right_grid = rank_grid[[left_tile-1, right_tile-1]] # tile numbering is 1-based
-        # left_right_grid = np.hstack((left_grid, my_grid, right_grid))
-        left_right_grid = np.hstack((rank_grid[[left_tile-1, tile-1, right_tile-1]])) # tile numbering is 1-based
-
+        up_down_grid = np.vstack((rank_grid['U'], rank_grid[tile], rank_grid['D']))
+        left_right_grid = np.hstack((rank_grid['L'], rank_grid[tile], rank_grid['R'])) # tile numbering is 1-based
         y_up_down_grid, x_up_down_grid = np.where(up_down_grid == global_rank)
         y_left_right_grid, x_left_right_grid = np.where(left_right_grid == global_rank)
-        
         return {'U': up_down_grid[(y_up_down_grid-1, x_up_down_grid)].item(),
                 'D': up_down_grid[(y_up_down_grid+1, x_up_down_grid)].item(),
                 'L': left_right_grid[(y_left_right_grid, x_left_right_grid-1)].item(),
@@ -154,11 +145,20 @@ class CubedSpherePartitioner(object):
                             [[ 0,-1],
                              [ 1, 0]] ])
         
+    def __split_tile_comm(self, comm, tile, global_rank):
+        """Return local tile communicator split from comm using tile as color"""
+        tile_comm = comm.Split(tile, global_rank)
+        assert self.__local_rank == tile_comm.Get_rank(), "Check calculated local rank vs. MPI local rank"
+        return tile_comm
+
     def comm(self):
-        """Returns the MPI communicator use to setup this partitioner"""
-        return self.__comm
+        """Returns the MPI communicator used to setup this partitioner"""
+        return self.__comm    
     
-    
+    def tile_comm(self):
+        """Returns the MPI communicator of the tile of the current MPI worker"""
+        return self.__tile_comm
+
     def num_halo(self):
         """Returns the number of halo points"""
         return self.__num_halo
@@ -174,7 +174,15 @@ class CubedSpherePartitioner(object):
     def num_ranks(self):
         """Returns the global number of ranks that have been distributed by this partitioner"""
         return self.__num_ranks
-    
+
+    def tile(self):
+        """Returns tile number of the current MPI worker"""
+        return self.__tile
+
+    def tile_root(self):
+        """Returns the global MPI rank which is root rank of the tile of the current MPI worker"""
+        return self.__tile2root(self.__tile)
+
     def shape(self):
         """Returns the shape of a local field (including halo points)"""
         return self.__shape
@@ -208,49 +216,53 @@ class CubedSpherePartitioner(object):
         return self.__rank_neighbors['D']
     
     
-    # def scatter(self, field, root=0):
-    #     """Scatter a global field from a root rank to the workers"""
-    #     if self.__rank == root:
-    #         assert np.any(field.shape[0] == np.array(self.__global_shape[0])), \
-    #             "Field does not have correct shape"
-    #     assert 0 <= root < self.__num_ranks, "Root processor must be a valid rank"
-    #     if self.__num_ranks == 1:
-    #         return field
-    #     sendbuf = None
-    #     if self.__rank == root:
-    #         sendbuf = np.empty( [self.__num_ranks,] + self.__max_shape, dtype=field.dtype )
-    #         for rank in range(self.__num_ranks):
-    #             j_start, i_start, j_end, i_end = self.__domains[rank]
-    #             sendbuf[rank, :, :j_end-j_start, :i_end-i_start] = field[:, j_start:j_end, i_start:i_end]
-    #     recvbuf = np.empty(self.__max_shape, dtype=field.dtype)
-    #     self.__comm.Scatter(sendbuf, recvbuf, root=root)
-    #     j_start, i_start, j_end, i_end = self.__domain
-    #     return recvbuf[:, :j_end-j_start, :i_end-i_start].copy()
+    def scatter(self, field, tile_root=None):
+        """Scatter a global field from a tile root rank to the tile workers"""
+        if tile_root is None:
+            tile_root = self.__tile_root
+        if self.__global_rank == tile_root:
+            assert np.any(field.shape[0] == np.array(self.__global_shape[0])), \
+                "Field does not have correct shape"
+        assert tile_root in self.__tile2ranks[self.__tile], "Root processor must be a valid tile rank"
+        if self.__ranks_per_tile == 1:
+            return field
+        sendbuf = None
+        if self.__global_rank == tile_root:
+            sendbuf = np.empty( [self.__ranks_per_tile,] + self.__max_shape, dtype=field.dtype )
+            for rank in range(self.__ranks_per_tile):
+                j_start, i_start, j_end, i_end = self.__domains[rank]
+                sendbuf[rank, :, :j_end-j_start, :i_end-i_start] = field[:, j_start:j_end, i_start:i_end]
+        recvbuf = np.empty(self.__max_shape, dtype=field.dtype)
+        self.__tile_comm.Scatter(sendbuf, recvbuf, root=0)
+        j_start, i_start, j_end, i_end = self.__domain
+        return recvbuf[:, :j_end-j_start, :i_end-i_start].copy()
         
     
-    # def gather(self, field, root=0):
-    #     """Gather a distributed fields from workers to a single global field on a root rank"""
-    #     assert np.any(field.shape == np.array(self.__shape)), "Field does not have correct shape"
-    #     assert -1 <= root < self.__num_ranks, "Root processor must be -1 (all) or a valid rank"
-    #     if self.__num_ranks == 1:
-    #         return field
-    #     j_start, i_start, j_end, i_end = self.__domain
-    #     sendbuf = np.empty( self.__max_shape, dtype=field.dtype )
-    #     sendbuf[:, :j_end-j_start, :i_end-i_start] = field
-    #     recvbuf = None
-    #     if self.__rank == root or root == -1:
-    #         recvbuf = np.empty( [self.__num_ranks,] + self.__max_shape, dtype=field.dtype )
-    #     if root > -1:
-    #         self.__comm.Gather(sendbuf, recvbuf, root=root)
-    #     else:
-    #         self.__comm.Allgather(sendbuf, recvbuf)
-    #     global_field = None
-    #     if self.__rank == root or root == -1:
-    #         global_field = np.empty(self.__global_shape, dtype=field.dtype)
-    #         for rank in range(self.__num_ranks):
-    #             j_start, i_start, j_end, i_end = self.__domains[rank]
-    #             global_field[:, j_start:j_end, i_start:i_end] = recvbuf[rank, :, :j_end-j_start, :i_end-i_start]
-    #     return global_field
+    def gather(self, field, tile_root=None):
+        """Gather a distributed fields from tile workers to a single global field on a tile root rank"""
+        if tile_root is None:
+            tile_root = self.__tile_root
+        assert np.any(field.shape == np.array(self.__shape)), "Field does not have correct shape"
+        assert tile_root in self.__tile2ranks[self.__tile] + [-1], "Root processor must be -1 (all) or a valid rank"
+        if self.__ranks_per_tile == 1:
+            return field
+        j_start, i_start, j_end, i_end = self.__domain
+        sendbuf = np.empty( self.__max_shape, dtype=field.dtype )
+        sendbuf[:, :j_end-j_start, :i_end-i_start] = field
+        recvbuf = None
+        if self.__global_rank == tile_root or tile_root == -1:
+            recvbuf = np.empty( [self.__ranks_per_tile,] + self.__max_shape, dtype=field.dtype )
+        if tile_root > -1:
+            self.__tile_comm.Gather(sendbuf, recvbuf, root=0)
+        else:
+            self.__tile_comm.Allgather(sendbuf, recvbuf)
+        global_field = None
+        if self.__global_rank == tile_root or tile_root == -1:
+            global_field = np.empty(self.__global_shape, dtype=field.dtype)
+            for rank in range(self.__ranks_per_tile):
+                j_start, i_start, j_end, i_end = self.__domains[rank]
+                global_field[:, j_start:j_end, i_start:i_end] = recvbuf[rank, :, :j_end-j_start, :i_end-i_start]
+        return global_field
                 
     
     def compute_domain(self):
@@ -267,11 +279,7 @@ class CubedSpherePartitioner(object):
         return (self.__ranks_per_tile // ranks_x, ranks_x)
     
 
-    def __ranks_per_face(self):
-        """Returns the number of MPI ranks per cube face"""
-        return self.__ranks_per_face
-
-
+    # NO LONGER NEEDED FOR CUBED SPHERE->DELETE:
     # def __get_neighbor_rank(self, offset):
     #     """Get the rank ID of a neighboring rank at a certain offset relative to the current rank"""
     #     position = self.__rank_to_position(self.__rank)
@@ -345,14 +353,10 @@ class CubedSpherePartitioner(object):
 
     def __rank_to_position(self, local_rank):
         """Find position of rank on worker grid"""
-        # sanity check ---------
-        assert ( local_rank // self.__size[1], local_rank % self.__size[1] ) == np.where(self.__rank_grid[self.__tile-1] == self.__global_rank), \
-            'Check rank numbering consistency'
-        # ----------------------
         return ( local_rank // self.__size[1], local_rank % self.__size[1] )
     
     def __position_to_rank(self, position):
-        """Find rank given a position on the worker grid"""
+        """Find local rank given a position on the worker grid"""
         if position[0] is None or position[1] is None:
             return None
         else:

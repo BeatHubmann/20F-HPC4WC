@@ -17,92 +17,6 @@ from partitioner import Partitioner
 from cubedspherepartitioner import CubedSpherePartitioner
 
 
-def cubed_sphere_ranks( rank, size ):
-    """Compute MPI rank distribution for cubed sphere.
-    
-    Fixed cube tile (facet) numbering:
-          |-----|
-          |     |
-          |  3  |
-          |     ^
-    |->---|---<-|-----|->---|
-    v     |     |     v     |
-    |  5  |  1  |  2  |  4  |
-    |     ^     ^     |     |
-    |-----|->---|->---|-----| 
-          |     |
-          |  6  |
-          ^     |
-          |->---|
-
-    rank -- MPI rank
-    size -- MPI communicator size
-
-    Returns:
-    cube_neighbors: Dictionary of neighboring cube tiles with relative coordinate system orientation
-    tile_placement: Dictionary of cube tile for given MPI rank
-    ranks_placement: Dictionary of assigned MPI ranks per cube tile
-    tile_roots: Dictionary of root ranks per cube tile
-    """
-
-
-
-
-    # Hard-coded: Cube tile arrangement:
-    # Usage: tile: [k: integer: neighbor tile in given 'direction',
-    #               m: integer: number positive 90 degree coordinate rotations]
-    cube_neighbors = {1: {'U': [3, 3], 'D': [6, 0], 'L': [5, 1], 'R': [2, 0]},
-                      2: {'U': [3, 0], 'D': [6, 3], 'L': [1, 0], 'R': [4, 1]},
-                      3: {'U': [5, 3], 'D': [2, 0], 'L': [1, 1], 'R': [4, 0]},
-                      4: {'U': [5, 0], 'D': [2, 3], 'L': [3, 0], 'R': [6, 1]},
-                      5: {'U': [1, 3], 'D': [4, 0], 'L': [3, 1], 'R': [6, 0]},
-                      6: {'U': [1, 0], 'D': [4, 3], 'L': [5, 0], 'R': [2, 1]}}
-
-    # Some sanity checks (comment out for production)
-    assert cube_neighbors[1]['L'][0] == cube_neighbors[6]['L'][0] == cube_neighbors[4]['U'][0], 'Cube geometry faulty'
-    assert cube_neighbors[6]['D'][0] == cube_neighbors[2]['R'][0] == cube_neighbors[3]['R'][0], 'Cube geometry faulty' 
-    assert cube_neighbors[3]['U'][0] == cube_neighbors[6]['L'][0] == cube_neighbors[1]['L'][0], 'Cube geometry faulty'
-    for i in range(6):
-        rotation_sum = 0
-        [rotation_sum := rotation_sum + k[1] for v, k in cube_neighbors[i+1].items()]
-        assert rotation_sum == 4, 'Cube geometry faulty' 
-
-
-    # Hard-coded: Array of 2D rotation matrices in positive 90 degree steps (0, 90, 180, 270):
-    rotate_90_deg = np.array([ [[ 1, 0],
-                                [ 0, 1]],
-                               [[ 0, 1],
-                                [-1, 0]],
-                               [[-1, 0],
-                                [ 0,-1]],
-                               [[ 0,-1],
-                                [ 1, 0]] ])
-
-    # Hard-coded: Cube has six faces:
-    ranks_per_tile = size // 6
-
-    # Hard-coded: Ranks along each coordinate axis:
-    ranks_per_axis = math.sqrt(ranks_per_tile) 
-   
-    # Distribute ranks onto tiles and create rank-tile dictionary:
-    tiles_placement = {i: (i // ranks_per_tile) + 1 for i in range(size)}
-    
-    # Reverse tiles_placement and create tile-rank list dictionary:
-    ranks_placement = dict()
-    for k, v in tiles_placement.items():
-        ranks_placement.setdefault(v, list()).append(k)
-
-    # Designate first rank on each tile as master rank:
-    tile_roots = {v: k[0] for v, k in ranks_placement.items()}
-
-    # Distribute ranks on tiles:
-    rank_grid = np.asarray([np.asarray(ranks_placement[i+1]).reshape(ranks_per_axis, -1) for i in range(6)])
-
-
-
-    return cube_neighbors, tiles_placement, ranks_placement, tile_roots
-
-
 def laplacian( in_field, lap_field, num_halo, extend=0 ):
     """Compute Laplacian using 2nd-order centered differences.
     
@@ -215,29 +129,16 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False):
     assert 0 < nz <= 1024, 'You have to specify a reasonable value for nz'
     assert 0 < num_iter <= 1024*1024, 'You have to specify a reasonable value for num_iter'
     assert 0 < num_halo <= 256, 'Your have to specify a reasonable number of halo points'
-    alpha = 1./32.
     
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
-    size = comm.Get_size()
 
-    assert size % 6 == 0, "Number of ranks must be multiple of 6"
-    assert math.sqrt(size / 6).is_integer(), \
-            "Number of ranks per face must be square number"
-    
-    ranks_per_face = size / 6
+    p = CubedSpherePartitioner(comm, [nz, ny, nx], num_halo)
 
-    my_face = size // ranks_per_face + 1
-    
+    tile = p.tile()
+    local_rank = p.local_rank()
 
-
-
-
-
-
-    p = Partitioner(comm, [nz, ny, nx], num_halo)
-
-    if rank == 0:
+    if local_rank == 0:
         f = np.zeros( (nz, ny + 2 * num_halo, nx + 2 * num_halo) )
         f[nz // 4:3 * nz // 4, num_halo + ny // 4:num_halo + 3 * ny // 4, num_halo + nx // 4:num_halo + 3 * nx // 4] = 1.0
     else:
@@ -247,23 +148,25 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False):
     out_field = np.copy( in_field )
 
     f = p.gather(in_field)
-    if rank == 0:
-        np.save('in_field', f)
+    if local_rank == 0:
+        np.save('in_field_{}'.format(tile), f)
         if plot_result:
             plt.ioff()
             plt.imshow(f[in_field.shape[0] // 2, :, :], origin='lower')
             plt.colorbar()
-            plt.savefig('in_field.png')
+            plt.savefig('in_field_{}.png'.format(tile))
             plt.close()
     
     # warmup caches
-    apply_diffusion( in_field, out_field, alpha, num_halo, p=p )
+    # TEMPORARILY DEACTIVATED FOR TESTING:
+    # apply_diffusion( in_field, out_field, alpha, num_halo, p=p )
 
     comm.Barrier()
     
     # time the actual work
     tic = time.time()
-    apply_diffusion( in_field, out_field, alpha, num_halo, num_iter=num_iter, p=p )
+    # TEMPORARILY DEACTIVATED FOR TESTING:
+    # apply_diffusion( in_field, out_field, alpha, num_halo, num_iter=num_iter, p=p )
     toc = time.time()
     
     comm.Barrier()
@@ -271,15 +174,16 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False):
     if rank == 0:
         print("Elapsed time for work = {} s".format(toc - tic) )
 
-    update_halo(out_field, num_halo, p)
+    # TEMPORARILY DEACTIVATED FOR TESTING:
+    # update_halo(out_field, num_halo, p)
 
     f = p.gather(out_field)
-    if rank == 0:
-        np.save('out_field', f)
+    if local_rank == 0:
+        np.save('out_field_{}'.format(tile), f)
         if plot_result:
             plt.imshow(f[out_field.shape[0] // 2, :, :], origin='lower')
             plt.colorbar()
-            plt.savefig('out_field.png')
+            plt.savefig('out_field_{}.png'.format(tile))
             plt.close()
 
 
