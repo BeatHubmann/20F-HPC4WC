@@ -65,38 +65,37 @@ def update_halo( field, num_halo, p=None ):
     r_rcvbuf = np.empty_like(field[:, num_halo:-num_halo, -num_halo:])
     reqs_recv.append(p.comm().Irecv(r_rcvbuf, source = p.right()))
 
-    # print("I am rank {} RECV bfr shapes left: {} right: {} up: {} down: {}".format(rank, str(l_rcvbuf.shape),str(r_rcvbuf.shape),str(t_rcvbuf.shape),str(b_rcvbuf.shape)))
-
     # rotate to fit receiver's halo orientation, then
     # pack and send (top and bottom edge, without corners)
-    b_sndbuf = np.rot90(field[:, -2 * num_halo:-num_halo, num_halo:-num_halo],
-                        p.rot_halo_top(),
-                        axes=(1,2)).copy()
-    reqs_send.append(p.comm().Isend(b_sndbuf, dest = p.top()))
-    # print("I am rank {} SEND bfr shapes down: {} ".format(rank, str(b_sndbuf.shape)))
-    t_sndbuf = np.rot90(field[:, -2 * num_halo:-num_halo, num_halo:-num_halo],
+    b_sndbuf = np.rot90(field[:, num_halo:2 * num_halo, num_halo:-num_halo],
                         p.rot_halo_bottom(),
                         axes=(1,2)).copy()
-    reqs_send.append(p.comm().Isend(t_sndbuf, dest = p.bottom()))
+    reqs_send.append(p.comm().Isend(b_sndbuf, dest = p.bottom()))
+    t_sndbuf = np.rot90(field[:, -2 * num_halo:-num_halo, num_halo:-num_halo],
+                        p.rot_halo_top(),
+                        axes=(1,2)).copy()
+    reqs_send.append(p.comm().Isend(t_sndbuf, dest = p.top()))
+
     # rotate to fit receiver's halo orientation, then
     # pack and send (left and right edge, without corners)
-    l_sndbuf = np.rot90(field[:, -2 * num_halo:-num_halo, num_halo:-num_halo],
-                        p.rot_halo_right(),
-                        axes=(1,2)).copy()
-    reqs_send.append(p.comm().Isend(l_sndbuf, dest = p.right()))
-    r_sndbuf = np.rot90(field[:, -2 * num_halo:-num_halo, num_halo:-num_halo],
+    l_sndbuf = np.rot90(field[:, num_halo:-num_halo, num_halo:2 * num_halo],
                         p.rot_halo_left(),
                         axes=(1,2)).copy()
-    reqs_send.append(p.comm().Isend(r_sndbuf, dest = p.left()))    
-
+    reqs_send.append(p.comm().Isend(l_sndbuf, dest = p.left()))    
+    r_sndbuf = np.rot90(field[:, num_halo:-num_halo, -2 * num_halo:-num_halo],
+                        p.rot_halo_right(),
+                        axes=(1,2)).copy()
+    reqs_send.append(p.comm().Isend(r_sndbuf, dest = p.right()))
+       
+    
     # print('waiting..')
     # wait and unpack
     for req in reqs_recv:
         req.wait()
-    field[:, 0:num_halo, num_halo:-num_halo] = b_rcvbuf
-    field[:, -num_halo:, num_halo:-num_halo] = t_rcvbuf
-    field[:, num_halo:-num_halo, 0:num_halo] = l_rcvbuf
-    field[:, num_halo:-num_halo, -num_halo:] = r_rcvbuf
+    field[:,         0: num_halo, num_halo:-num_halo] = b_rcvbuf
+    field[:, -num_halo:         , num_halo:-num_halo] = t_rcvbuf
+    field[:,  num_halo:-num_halo,        0: num_halo] = l_rcvbuf
+    field[:,  num_halo:-num_halo,-num_halo:         ] = r_rcvbuf
     
     # wait for sends to complete
     for req in reqs_send:
