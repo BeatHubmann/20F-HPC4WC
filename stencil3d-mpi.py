@@ -159,9 +159,9 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False):
     if local_rank == 0:
         f = np.zeros( (nz, ny + 2 * num_halo, nx + 2 * num_halo) )
         # f[nz // 4:3 * nz // 4, num_halo + ny // 4:num_halo + 3 * ny // 4, num_halo + nx // 4:num_halo + 3 * nx // 4] = 1.0
-        f[nz // 10:9 * nz // 10, num_halo + ny // 10:num_halo + 9 * ny // 10, num_halo + nx // 10:num_halo + 9 * nx // 10] = 1.0
-        # f[nz // 4:3 * nz // 4, num_halo:num_halo + ny // 4, num_halo:num_halo + nx // 4] = 1.0
-        # f[nz // 4:3 * nz // 4, num_halo + 3 * ny // 4:-num_halo, num_halo + 3 * nx // 4:-num_halo] = 1.0
+        # f[nz // 10:9 * nz // 10, num_halo + ny // 10:num_halo + 9 * ny // 10, num_halo + nx // 10:num_halo + 9 * nx // 10] = 1.0
+        f[nz // 4:3 * nz // 4, num_halo:num_halo + ny // 4, num_halo:num_halo + nx // 4] = 1.0
+        f[nz // 4:3 * nz // 4, num_halo + 3 * ny // 4:-num_halo, num_halo + 3 * nx // 4:-num_halo] = 1.0
     else:
         f = np.empty(1)
     in_field = p.scatter(f)
