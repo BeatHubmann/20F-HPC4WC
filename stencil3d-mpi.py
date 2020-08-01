@@ -121,7 +121,7 @@ def apply_diffusion( in_field, out_field, alpha, num_halo, num_iter=1, p=None ):
         update_halo( in_field, num_halo, p )
         
         laplacian( in_field, tmp_field, num_halo=num_halo, extend=1 )
-#        update_halo( tmp_field, num_halo, p )
+        update_halo( tmp_field, num_halo, p )
         laplacian( tmp_field, out_field, num_halo=num_halo, extend=0 )
         
         out_field[:, num_halo:-num_halo, num_halo:-num_halo] = \
