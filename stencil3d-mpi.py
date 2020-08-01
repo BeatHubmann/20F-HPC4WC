@@ -47,43 +47,60 @@ def update_halo( field, num_halo, p=None ):
     Note: corners are updated in the left/right phase of the halo-update
     """
 
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+
+    # print("Updating halo - I am rank {} on tile {} - RANKS left: {} right: {} up: {} down {}".format(rank, p.tile(), p.left(), p.right(), p.top(), p.bottom()))
+
+    reqs_recv, reqs_send = [], []
+
     # allocate recv buffers and pre-post the receives (top and bottom edge, without corners)
     b_rcvbuf = np.empty_like(field[:, 0:num_halo, num_halo:-num_halo])
+    reqs_recv.append(p.comm().Irecv(b_rcvbuf, source = p.bottom()))
     t_rcvbuf = np.empty_like(field[:, -num_halo:, num_halo:-num_halo])
-    reqs_tb = []
-    reqs_tb.append(p.comm().Irecv(b_rcvbuf, source = p.bottom()))
-    reqs_tb.append(p.comm().Irecv(t_rcvbuf, source = p.top()))
+    reqs_recv.append(p.comm().Irecv(t_rcvbuf, source = p.top()))
+    # allocate recv buffers and pre-post the receives (left and right edge, without corners)
+    l_rcvbuf = np.empty_like(field[:, num_halo:-num_halo:, 0:num_halo])
+    reqs_recv.append(p.comm().Irecv(l_rcvbuf, source = p.left()))
+    r_rcvbuf = np.empty_like(field[:, num_halo:-num_halo, -num_halo:])
+    reqs_recv.append(p.comm().Irecv(r_rcvbuf, source = p.right()))
 
-    # allocate recv buffers and pre-post the receives (left and right edge, including corners)
-    l_rcvbuf = np.empty_like(field[:, :, 0:num_halo])
-    r_rcvbuf = np.empty_like(field[:, :, -num_halo:])
-    reqs_lr = []
-    reqs_lr.append(p.comm().Irecv(l_rcvbuf, source = p.left()))
-    reqs_lr.append(p.comm().Irecv(r_rcvbuf, source = p.right()))
+    # print("I am rank {} RECV bfr shapes left: {} right: {} up: {} down: {}".format(rank, str(l_rcvbuf.shape),str(r_rcvbuf.shape),str(t_rcvbuf.shape),str(b_rcvbuf.shape)))
 
+    # rotate to fit receiver's halo orientation, then
     # pack and send (top and bottom edge, without corners)
-    b_sndbuf = field[:, -2 * num_halo:-num_halo, num_halo:-num_halo].copy()
-    reqs_tb.append(p.comm().Isend(b_sndbuf, dest = p.top()))
-    t_sndbuf = field[:, num_halo:2 * num_halo, num_halo:-num_halo].copy()
-    reqs_tb.append(p.comm().Isend(t_sndbuf, dest = p.bottom()))
-    
+    b_sndbuf = np.rot90(field[:, -2 * num_halo:-num_halo, num_halo:-num_halo],
+                        p.rot_halo_top(),
+                        axes=(1,2)).copy()
+    reqs_send.append(p.comm().Isend(b_sndbuf, dest = p.top()))
+    # print("I am rank {} SEND bfr shapes down: {} ".format(rank, str(b_sndbuf.shape)))
+    t_sndbuf = np.rot90(field[:, -2 * num_halo:-num_halo, num_halo:-num_halo],
+                        p.rot_halo_bottom(),
+                        axes=(1,2)).copy()
+    reqs_send.append(p.comm().Isend(t_sndbuf, dest = p.bottom()))
+    # rotate to fit receiver's halo orientation, then
+    # pack and send (left and right edge, without corners)
+    l_sndbuf = np.rot90(field[:, -2 * num_halo:-num_halo, num_halo:-num_halo],
+                        p.rot_halo_right(),
+                        axes=(1,2)).copy()
+    reqs_send.append(p.comm().Isend(l_sndbuf, dest = p.right()))
+    r_sndbuf = np.rot90(field[:, -2 * num_halo:-num_halo, num_halo:-num_halo],
+                        p.rot_halo_left(),
+                        axes=(1,2)).copy()
+    reqs_send.append(p.comm().Isend(r_sndbuf, dest = p.left()))    
+
+    # print('waiting..')
     # wait and unpack
-    for req in reqs_tb:
+    for req in reqs_recv:
         req.wait()
     field[:, 0:num_halo, num_halo:-num_halo] = b_rcvbuf
     field[:, -num_halo:, num_halo:-num_halo] = t_rcvbuf
+    field[:, num_halo:-num_halo, 0:num_halo] = l_rcvbuf
+    field[:, num_halo:-num_halo, -num_halo:] = r_rcvbuf
     
-    # pack and send (left and right edge, including corners)
-    l_sndbuf = field[:, :, -2 * num_halo:-num_halo].copy()
-    reqs_lr.append(p.comm().Isend(l_sndbuf, dest = p.right()))
-    r_sndbuf = field[:, :, num_halo:2 * num_halo].copy()
-    reqs_lr.append(p.comm().Isend(r_sndbuf, dest = p.left()))
-
-    # wait and unpack
-    for req in reqs_lr:
+    # wait for sends to complete
+    for req in reqs_send:
         req.wait()
-    field[:, :, 0:num_halo] = l_rcvbuf
-    field[:, :, -num_halo:] = r_rcvbuf
             
 
 def apply_diffusion( in_field, out_field, alpha, num_halo, num_iter=1, p=None ):
@@ -104,6 +121,7 @@ def apply_diffusion( in_field, out_field, alpha, num_halo, num_iter=1, p=None ):
         update_halo( in_field, num_halo, p )
         
         laplacian( in_field, tmp_field, num_halo=num_halo, extend=1 )
+        update_halo( tmp_field, num_halo, p )
         laplacian( tmp_field, out_field, num_halo=num_halo, extend=0 )
         
         out_field[:, num_halo:-num_halo, num_halo:-num_halo] = \
@@ -129,6 +147,7 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False):
     assert 0 < nz <= 1024, 'You have to specify a reasonable value for nz'
     assert 0 < num_iter <= 1024*1024, 'You have to specify a reasonable value for num_iter'
     assert 0 < num_halo <= 256, 'Your have to specify a reasonable number of halo points'
+    alpha = 1./32.
     
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
@@ -140,7 +159,10 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False):
 
     if local_rank == 0:
         f = np.zeros( (nz, ny + 2 * num_halo, nx + 2 * num_halo) )
-        f[nz // 4:3 * nz // 4, num_halo + ny // 4:num_halo + 3 * ny // 4, num_halo + nx // 4:num_halo + 3 * nx // 4] = 1.0
+        # f[nz // 4:3 * nz // 4, num_halo + ny // 4:num_halo + 3 * ny // 4, num_halo + nx // 4:num_halo + 3 * nx // 4] = 1.0
+        f[nz // 10:9 * nz // 10, num_halo + ny // 10:num_halo + 9 * ny // 10, num_halo + nx // 10:num_halo + 9 * nx // 10] = 1.0
+        # f[nz // 4:3 * nz // 4, num_halo:num_halo + ny // 4, num_halo:num_halo + nx // 4] = 1.0
+        # f[nz // 4:3 * nz // 4, num_halo + 3 * ny // 4:-num_halo, num_halo + 3 * nx // 4:-num_halo] = 1.0
     else:
         f = np.empty(1)
     in_field = p.scatter(f)
@@ -158,15 +180,13 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False):
             plt.close()
     
     # warmup caches
-    # TEMPORARILY DEACTIVATED FOR TESTING:
-    # apply_diffusion( in_field, out_field, alpha, num_halo, p=p )
+    apply_diffusion( in_field, out_field, alpha, num_halo, p=p )
 
     comm.Barrier()
     
     # time the actual work
     tic = time.time()
-    # TEMPORARILY DEACTIVATED FOR TESTING:
-    # apply_diffusion( in_field, out_field, alpha, num_halo, num_iter=num_iter, p=p )
+    apply_diffusion( in_field, out_field, alpha, num_halo, num_iter=num_iter, p=p )
     toc = time.time()
     
     comm.Barrier()
@@ -174,14 +194,14 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False):
     if rank == 0:
         print("Elapsed time for work = {} s".format(toc - tic) )
 
-    # TEMPORARILY DEACTIVATED FOR TESTING:
-    # update_halo(out_field, num_halo, p)
+    update_halo(out_field, num_halo, p)
 
     f = p.gather(out_field)
     if local_rank == 0:
         np.save('out_field_{}'.format(tile), f)
         if plot_result:
             plt.imshow(f[out_field.shape[0] // 2, :, :], origin='lower')
+            # plt.imshow(f[out_field.shape[0] // 2, num_halo:-num_halo, num_halo:-num_halo], origin='lower')
             plt.colorbar()
             plt.savefig('out_field_{}.png'.format(tile))
             plt.close()

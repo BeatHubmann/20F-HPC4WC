@@ -60,6 +60,11 @@ class CubedSpherePartitioner(object):
 
         self.__rank_neighbors = self.__assign_rank_neighbors(self.__global_rank, self.__rank_grid, self.__tile)
 
+        self.__neighbor_halo_rotations = self.__assign_neighbor_halo_rotations(self.__tile,
+                                                                               self.__rank2tile,
+                                                                               self.__tile_neighbors,
+                                                                               self.__rank_neighbors)
+
         self.__global_shape = [domain[0], domain[1] + 2 * num_halo, domain[2] + 2 * num_halo]
 
         self.__size = self.__setup_grid()
@@ -115,7 +120,8 @@ class CubedSpherePartitioner(object):
 
 
     def __assign_rank_grid(self, tile, tile2ranks, tile_neighbors, ranks_per_axis):
-        """Return dictionary of arrays containing all neighboring tiles' placements of global ranks"""
+        """Return dictionary of arrays containing all neighboring tiles' placements of global ranks
+           and whether their bordering coordinate orientation is flipped with regard to center tile"""
         rank_grid = {tile: self.__calculate_rank_grid(tile, tile2ranks, ranks_per_axis)}
         for k, v in tile_neighbors[tile].items():
             rank_grid[k] = self.__calculate_rank_grid(v[0], tile2ranks, ranks_per_axis, v[1])
@@ -134,16 +140,12 @@ class CubedSpherePartitioner(object):
                 'R': left_right_grid[(y_left_right_grid, x_left_right_grid+1)].item()}
 
 
-    def __define_rotations(self):
-        """Return array of of 2D rotation matrices in positive 90 degree steps (0, 90, 180, 270)"""
-        return np.asarray([ [[ 1, 0],
-                             [ 0, 1]],
-                            [[ 0, 1],
-                             [-1, 0]],
-                            [[-1, 0],
-                             [ 0,-1]],
-                            [[ 0,-1],
-                             [ 1, 0]] ])
+    def __assign_neighbor_halo_rotations(self, tile, rank2tile, tile_neighbors, rank_neighbors):
+        """Return dictionary: Required positive 90 degree halo rotations to match neighbor's halo orientation"""
+        neighbor_tiles = tile_neighbors[tile]
+        neighbor_tiles_rotations = {v[0]: v[1] for v in neighbor_tiles.values()}
+        return {v: 0 if tile == rank2tile[k] else ((4-neighbor_tiles_rotations[rank2tile[k]])%4) 
+                for v, k in rank_neighbors.items()}
 
 
     def __split_tile_comm(self, comm, tile, global_rank):
@@ -231,7 +233,27 @@ class CubedSpherePartitioner(object):
     def bottom(self):
         """Returns the rank of the bottom/down neighbor"""
         return self.__rank_neighbors['D']
-    
+
+
+    def rot_halo_left(self):
+        """Returns number of positive 90 degree rotations required to match halo to left neighbor's halo"""
+        return self.__neighbor_halo_rotations['L']
+
+
+    def rot_halo_right(self):
+        """Returns number of positive 90 degree rotations required to match halo to right neighbor's halo"""
+        return self.__neighbor_halo_rotations['R']
+
+
+    def rot_halo_top(self):
+        """Returns number of positive 90 degree rotations required to match halo to top neighbor's halo"""
+        return self.__neighbor_halo_rotations['U']
+
+
+    def rot_halo_bottom(self):
+        """Returns number of positive 90 degree rotations required to match halo to bottom neighbor's halo"""
+        return self.__neighbor_halo_rotations['D']
+
     
     def scatter(self, field, tile_root=None):
         """Scatter a global field from a tile root rank to the tile workers"""
