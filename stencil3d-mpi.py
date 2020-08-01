@@ -39,12 +39,12 @@ def laplacian( in_field, lap_field, num_halo, extend=0 ):
 
 
 def update_halo( field, num_halo, p=None ):
-    """Update the halo-zone using an up/down and left/right strategy.
+    """Update the halo-zone. 
     
     field    -- input/output field (nz x ny x nx with halo in x- and y-direction)
     num_halo -- number of halo points
     
-    Note: corners are updated in the left/right phase of the halo-update
+    Note: corners are still TO BE DEALT WITH
     """
 
     comm = MPI.COMM_WORLD
