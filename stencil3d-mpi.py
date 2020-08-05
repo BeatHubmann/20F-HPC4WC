@@ -221,8 +221,8 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False):
     if local_rank == 0:
         np.save('out_field_{}'.format(tile), f)
         if plot_result:
-            plt.imshow(f[out_field.shape[0] // 2, :, :], origin='lower')
-            # plt.imshow(f[out_field.shape[0] // 2, num_halo:-num_halo, num_halo:-num_halo], origin='lower')
+            # plt.imshow(f[out_field.shape[0] // 2, :, :], origin='lower')
+            plt.imshow(f[out_field.shape[0] // 2, num_halo:-num_halo, num_halo:-num_halo], origin='lower')
             plt.colorbar()
             plt.savefig('out_field_{}.png'.format(tile))
             plt.close()
