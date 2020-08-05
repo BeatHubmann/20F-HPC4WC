@@ -25,7 +25,8 @@ def laplacian( in_field, lap_field, num_halo, extend=0 ):
     num_halo  -- number of halo points
     
     Keyword arguments:
-    extend    -- extend computation into halo-zone by this number of points
+    extend    -- extend computation into halo-zone by this number of points.
+                 this also uses non-corner halo data to correct stencil for missing corner halo data.
     """
 
     ib = num_halo - extend
@@ -35,7 +36,27 @@ def laplacian( in_field, lap_field, num_halo, extend=0 ):
     
     lap_field[:, jb:je, ib:ie] = - 4. * in_field[:, jb:je, ib:ie]  \
         + in_field[:, jb:je, ib - 1:ie - 1] + in_field[:, jb:je, ib + 1:ie + 1 if ie != -1 else None]  \
-        + in_field[:, jb - 1:je - 1, ib:ie] + in_field[:, jb + 1:je + 1 if je != -1 else None, ib:ie]
+        + in_field[:, jb - 1:je - 1, ib:ie] + in_field[:, jb + 1:je + 1 if je != -1 else None, ib:ie] 
+    
+    # fixing corners
+    if extend > 0:
+        # bottom-left
+        lap_field[:, jb, num_halo] += in_field[:, num_halo, ib] # lap_field(-1, 0) += in_field(0, -1)
+        lap_field[:, num_halo, ib] += in_field[:, jb, num_halo] # lap_field(0, -1) += in_field(-1, 0)
+        lap_field[:, jb, ib] +=  (in_field[:, num_halo, ib] + in_field[:, jb, num_halo]) # lap_field(-1,-1) += (in_field(0, -1)+# lap_field(0, -1) += in_field(-1, 0))
+        # bottom-right
+        lap_field[:, jb, -num_halo] += in_field[:, num_halo, ie] 
+        lap_field[:, num_halo, ie] += in_field[:, jb, -num_halo] 
+        lap_field[:, jb, ib] +=  (in_field[:, num_halo, ie] + in_field[:, jb, -num_halo]) 
+        # top-left
+        lap_field[:, je, num_halo] += in_field[:, -num_halo, ib] 
+        lap_field[:, -num_halo, ib] += in_field[:, je, num_halo] 
+        lap_field[:, jb, ib] +=  (in_field[:, num_halo, ib] + in_field[:, jb, num_halo]) 
+        # top-right
+        lap_field[:, je, -num_halo] += in_field[:, -num_halo, ie] 
+        lap_field[:, -num_halo, ie] += in_field[:, je, -num_halo] 
+        lap_field[:, jb, ib] +=  (in_field[:, -num_halo, ie] + in_field[:, je, -num_halo])
+
 
 
 def update_halo( field, num_halo, p=None ):
@@ -113,14 +134,15 @@ def apply_diffusion( in_field, out_field, alpha, num_halo, num_iter=1, p=None ):
     num_iter  -- number of iterations to execute
     """
 
-    tmp_field = np.empty_like( in_field )
+    # tmp_field = np.empty_like( in_field )
+    tmp_field = np.zeros_like( in_field )
     
     for n in range(num_iter):
         
         update_halo( in_field, num_halo, p )
         
         laplacian( in_field, tmp_field, num_halo=num_halo, extend=1 )
-        update_halo( tmp_field, num_halo, p )
+        # update_halo( tmp_field, num_halo, p )
         laplacian( tmp_field, out_field, num_halo=num_halo, extend=0 )
         
         out_field[:, num_halo:-num_halo, num_halo:-num_halo] = \
