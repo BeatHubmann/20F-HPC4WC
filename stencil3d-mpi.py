@@ -43,19 +43,19 @@ def laplacian( in_field, lap_field, num_halo, extend=0 ):
         # bottom-left
         lap_field[:, jb, num_halo] += in_field[:, num_halo, ib] # lap_field(-1, 0) += in_field(0, -1)
         lap_field[:, num_halo, ib] += in_field[:, jb, num_halo] # lap_field(0, -1) += in_field(-1, 0)
-        lap_field[:, jb, ib] +=  (in_field[:, num_halo, ib] + in_field[:, jb, num_halo]) # lap_field(-1,-1) += (in_field(0, -1)+# lap_field(0, -1) += in_field(-1, 0))
+        #lap_field[:, jb, ib] +=  (in_field[:, num_halo, ib] + in_field[:, jb, num_halo]) # lap_field(-1,-1) += (in_field(0, -1)+# lap_field(0, -1) += in_field(-1, 0))
         # bottom-right
         lap_field[:, jb, -num_halo] += in_field[:, num_halo, ie] 
         lap_field[:, num_halo, ie] += in_field[:, jb, -num_halo] 
-        lap_field[:, jb, ib] +=  (in_field[:, num_halo, ie] + in_field[:, jb, -num_halo]) 
+        #lap_field[:, jb, ib] +=  (in_field[:, num_halo, ie] + in_field[:, jb, -num_halo]) 
         # top-left
         lap_field[:, je, num_halo] += in_field[:, -num_halo, ib] 
         lap_field[:, -num_halo, ib] += in_field[:, je, num_halo] 
-        lap_field[:, jb, ib] +=  (in_field[:, num_halo, ib] + in_field[:, jb, num_halo]) 
+        #lap_field[:, jb, ib] +=  (in_field[:, num_halo, ib] + in_field[:, jb, num_halo]) 
         # top-right
         lap_field[:, je, -num_halo] += in_field[:, -num_halo, ie] 
         lap_field[:, -num_halo, ie] += in_field[:, je, -num_halo] 
-        lap_field[:, jb, ib] +=  (in_field[:, -num_halo, ie] + in_field[:, je, -num_halo])
+        #lap_field[:, jb, ib] +=  (in_field[:, -num_halo, ie] + in_field[:, je, -num_halo])
 
 
 
