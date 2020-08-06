@@ -204,11 +204,6 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
     tile = p.tile()
     local_rank = p.local_rank()
 
-    # # Override hyperparameters for verification:
-    # if verify:
-    #     nx, ny = 8, 8
-    #     num_iter = 1
-
     if local_rank == 0:
         f = np.zeros( (nz, ny + 2 * num_halo, nx + 2 * num_halo) )
         if verify:
@@ -234,7 +229,7 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
 
     # to have a rank indication when inspecting fields for verification/diagnostics:
     if verify:
-        in_field += (rank / 1e2 + local_rank / 1e4)
+        in_field += rank / 1e3
 
     out_field = np.copy( in_field )
 
@@ -270,11 +265,11 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
 
     update_halo(out_field, num_halo, p)
 
-   
-    if p.global_rank() == 1:
-         with np.printoptions(precision=5, suppress=True, linewidth=120):
-             # print("Left buffer data:\n{}".format(field[0, num_halo:-num_halo, num_halo:2 * num_halo])) 
-             print("out_field:\n{}".format(np.flipud(out_field[0,:,:])))
+    for r in [0,1]
+        if p.global_rank() == r:
+            with np.printoptions(precision=5, suppress=True, linewidth=120):
+                # print("Left buffer data:\n{}".format(field[0, num_halo:-num_halo, num_halo:2 * num_halo])) 
+                print("rank {} out_field:\n{}".format(r,np.flipud(out_field[0,:,:])))
 
 
     f = p.gather(out_field)
