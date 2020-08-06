@@ -210,7 +210,7 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
     #     num_iter = 1
 
     if local_rank == 0:
-        f = np.ones( (nz, ny + 2 * num_halo, nx + 2 * num_halo) )
+        f = np.zeros( (nz, ny + 2 * num_halo, nx + 2 * num_halo) )
         if verify:
             test_grid = np.add(*np.mgrid[0:ny*10:10, 0:nx])
             f[:, num_halo:-num_halo, num_halo:-num_halo] = test_grid
@@ -240,6 +240,9 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
 
     f = p.gather(in_field)
     if local_rank == 0:
+        if rank == 0:
+            with np.printoptions(precision=5, suppress=True, linewidth=120):
+                print("in f:\n{}".format(np.flipud(f[0,:,:])))
         np.save('in_field_{}{}'.format(tile, '_verify' if verify else ''), f)
         if plot_result or verify:
             plt.ioff()
@@ -267,8 +270,18 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
 
     update_halo(out_field, num_halo, p)
 
+   
+    if p.global_rank() == 1:
+         with np.printoptions(precision=5, suppress=True, linewidth=120):
+             # print("Left buffer data:\n{}".format(field[0, num_halo:-num_halo, num_halo:2 * num_halo])) 
+             print("out_field:\n{}".format(np.flipud(out_field[0,:,:])))
+
+
     f = p.gather(out_field)
     if local_rank == 0:
+        if rank == 0:
+            with np.printoptions(precision=5, suppress=True, linewidth=120):
+                print("out f:\n{}".format(np.flipud(f[0,:,:])))
         np.save('out_field_{}{}'.format(tile, '_verify' if verify else ''), f)
         if plot_result or verify:
             if verify:
