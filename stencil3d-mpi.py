@@ -206,11 +206,7 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
 
     if local_rank == 0:
         f = np.zeros( (nz, ny + 2 * num_halo, nx + 2 * num_halo) )
-        if verify:
-            pass
-            #test_grid = np.add(*np.mgrid[0:ny * 10:10, 0:nx])
-            #f[:, num_halo:-num_halo, num_halo:-num_halo] = test_grid
-        else:
+        if not verify:
             # Option 1: Like stencil2d-mpi during HPC4WC course:
             # f[nz // 4:3 * nz // 4, num_halo + ny // 4:num_halo + 3 * ny // 4, num_halo + nx // 4:num_halo + 3 * nx // 4] = 1.0
             
@@ -281,10 +277,9 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
     if verify:
         # write to standard output if arrays small enough:
         if nx < 10:
-            for r in range(p.__rank_per_tile):                                
-                with np.printoptions(precision=3, suppress=True, linewidth=120):
-                    print("global rank {} local rank {} subtile after one halo exchange:\n{}".format(rank, r,np.flipud(out_field[0,:,:])))
-
+            with np.printoptions(precision=3, suppress=True, linewidth=120):
+                print("global rank {}, tile {}, local rank {}: Subtile after one halo exchange:\n{}".format(rank, local_rank, p.tile(), np.flipud(out_field[0,:,:])))
+	
 
     # f = p.gather(out_field)
     # if local_rank == 0:
