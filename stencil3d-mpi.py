@@ -234,18 +234,27 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
     out_field = np.copy( in_field )
 
     f = p.gather(in_field)
+   
     if local_rank == 0:
         if rank == 0:
             with np.printoptions(precision=5, suppress=True, linewidth=120):
                 print("in f:\n{}".format(np.flipud(f[0,:,:])))
-        np.save('in_field_{}{}'.format(tile, '_verify' if verify else ''), f)
+        np.save('global_in_field_{}{}'.format(tile, '_verify' if verify else ''), f)
         if plot_result or verify:
             plt.ioff()
             plt.imshow(f[in_field.shape[0] // 2, :, :], origin='lower')
             plt.colorbar()
-            plt.savefig('in_field_{}{}.png'.format(tile, '_verify' if verify else ''))
+            plt.savefig('global_in_field_{}{}.png'.format(tile, '_verify' if verify else ''))
             plt.close()
-    
+
+    if plot_result or verify:
+        np.save('local_in_field_{}-{}_{}{}'.format(tile, local_rank, rank, '_verify' if verify else ''), in_field)
+        plt.ioff()
+        plt.imshow(in_field[in_field.shape[0] // 2, :, :], origin='lower')
+        plt.colorbar()
+        plt.savefig('local_in_field_{}-{}_{}{}'.format(tile, local_rank, rank, '_verify' if verify else ''))
+        plt.close()
+
     # no diffusion performed for verification:
     if not verify:
         # warmup caches
@@ -265,27 +274,40 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
 
     update_halo(out_field, num_halo, p)
 
-    for r in [0,1]
+    # halo exchange correctness verification:
+    if verify:
+        pass
+
+
+    for r in [0,1]:
         if p.global_rank() == r:
             with np.printoptions(precision=5, suppress=True, linewidth=120):
                 # print("Left buffer data:\n{}".format(field[0, num_halo:-num_halo, num_halo:2 * num_halo])) 
                 print("rank {} out_field:\n{}".format(r,np.flipud(out_field[0,:,:])))
 
 
-    f = p.gather(out_field)
-    if local_rank == 0:
-        if rank == 0:
-            with np.printoptions(precision=5, suppress=True, linewidth=120):
-                print("out f:\n{}".format(np.flipud(f[0,:,:])))
-        np.save('out_field_{}{}'.format(tile, '_verify' if verify else ''), f)
-        if plot_result or verify:
-            if verify:
-                plt.imshow(f[out_field.shape[0] // 2, :, :], origin='lower')
-            else:
-                plt.imshow(f[out_field.shape[0] // 2, num_halo:-num_halo, num_halo:-num_halo], origin='lower')
-            plt.colorbar()
-            plt.savefig('out_field_{}{}.png'.format(tile, '_verify' if verify else ''))
-            plt.close()
+    # f = p.gather(out_field)
+    # if local_rank == 0:
+    #     if rank == 0:
+    #         with np.printoptions(precision=5, suppress=True, linewidth=120):
+    #             print("out f:\n{}".format(np.flipud(f[0,:,:])))
+    #     np.save('out_field_{}{}'.format(tile, '_verify' if verify else ''), f)
+    #     if plot_result or verify:
+    #         if verify:
+    #             plt.imshow(f[out_field.shape[0] // 2, :, :], origin='lower')
+    #         else:
+    #             plt.imshow(f[out_field.shape[0] // 2, num_halo:-num_halo, num_halo:-num_halo], origin='lower')
+    #         plt.colorbar()
+    #         plt.savefig('out_field_{}{}.png'.format(tile, '_verify' if verify else ''))
+    #         plt.close()
+
+    if plot_result or verify:
+        np.save('local_out_field_{}-{}_{}{}'.format(tile, local_rank, rank, '_verify' if verify else ''), out_field)
+        plt.ioff()
+        plt.imshow(out_field[out_field.shape[0] // 2, :, :], origin='lower')
+        plt.colorbar()
+        plt.savefig('local_out_field_{}-{}_{}{}'.format(tile, local_rank, rank, '_verify' if verify else ''))
+        plt.close()
 
 
 if __name__ == '__main__':
