@@ -102,10 +102,10 @@ def update_halo( field, num_halo, p=None ):
     l_sndbuf = np.rot90(field[:, num_halo:-num_halo, num_halo:2 * num_halo],
                         p.rot_halo_left(),
                         axes=(1,2)).copy()
-    if p.global_rank() == 4:
-         with np.printoptions(precision=5, suppress=True, linewidth=120):
-             # print("Left buffer data:\n{}".format(field[0, num_halo:-num_halo, num_halo:2 * num_halo])) 
-             print("l_sndbuf:\n{}".format(l_sndbuf[0]))
+   # if p.global_rank() == 4:
+   #      with np.printoptions(precision=5, suppress=True, linewidth=120):
+   #          # print("Left buffer data:\n{}".format(field[0, num_halo:-num_halo, num_halo:2 * num_halo])) 
+   #          print("l_sndbuf:\n{}".format(l_sndbuf[0]))
     reqs_send.append(p.comm().Isend(l_sndbuf, dest = p.left()))    
     r_sndbuf = np.rot90(field[:, num_halo:-num_halo, -2 * num_halo:-num_halo],
                         p.rot_halo_right(),
@@ -122,11 +122,11 @@ def update_halo( field, num_halo, p=None ):
     field[:,  num_halo:-num_halo,        0: num_halo] = l_rcvbuf
     field[:,  num_halo:-num_halo,-num_halo:         ] = r_rcvbuf
 
-    if p.global_rank() == 1:
-         with np.printoptions(precision=5, suppress=True, linewidth=120):
-             # print("Left buffer data:\n{}".format(field[0, num_halo:-num_halo, num_halo:2 * num_halo])) 
-             print("r_rcvbuf:\n{}".format(r_rcvbuf[0]))
-             print("inserted:\n{}".format( field[0,  num_halo:-num_halo,-num_halo:]))
+  #  if p.global_rank() == 1:
+  #       with np.printoptions(precision=5, suppress=True, linewidth=120):
+  #           # print("Left buffer data:\n{}".format(field[0, num_halo:-num_halo, num_halo:2 * num_halo])) 
+  #           print("r_rcvbuf:\n{}".format(r_rcvbuf[0]))
+  #           print("inserted:\n{}".format( field[0,  num_halo:-num_halo,-num_halo:]))
     # wait for sends to complete
     for req in reqs_send:
         req.wait()
@@ -207,8 +207,9 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
     if local_rank == 0:
         f = np.zeros( (nz, ny + 2 * num_halo, nx + 2 * num_halo) )
         if verify:
-            test_grid = np.add(*np.mgrid[0:ny*10:10, 0:nx])
-            f[:, num_halo:-num_halo, num_halo:-num_halo] = test_grid
+            pass
+            #test_grid = np.add(*np.mgrid[0:ny * 10:10, 0:nx])
+            #f[:, num_halo:-num_halo, num_halo:-num_halo] = test_grid
         else:
             # Option 1: Like stencil2d-mpi during HPC4WC course:
             # f[nz // 4:3 * nz // 4, num_halo + ny // 4:num_halo + 3 * ny // 4, num_halo + nx // 4:num_halo + 3 * nx // 4] = 1.0
@@ -229,16 +230,18 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
 
     # to have a rank indication when inspecting fields for verification/diagnostics:
     if verify:
-        in_field += rank / 1e3
+        local_ny, local_nx = in_field.shape[1:]
+        test_grid = np.add(*np.mgrid[0:(local_ny - 2 * num_halo) * 100:100, 0:(local_nx - 2 * num_halo)]) + rank / 1e3 
+        in_field[:, num_halo:-num_halo, num_halo:-num_halo] = test_grid	
 
     out_field = np.copy( in_field )
 
     f = p.gather(in_field)
    
     if local_rank == 0:
-        if rank == 0:
-            with np.printoptions(precision=5, suppress=True, linewidth=120):
-                print("in f:\n{}".format(np.flipud(f[0,:,:])))
+      #  if rank == 0:
+      #      with np.printoptions(precision=5, suppress=True, linewidth=120):
+      #          print("in f:\n{}".format(np.flipud(f[0,:,:])))
         np.save('global_in_field_{}{}'.format(tile, '_verify' if verify else ''), f)
         if plot_result or verify:
             plt.ioff()
@@ -279,7 +282,7 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
         pass
 
 
-    for r in [0,1]:
+    for r in [0,1,2,3]:
         if p.global_rank() == r:
             with np.printoptions(precision=5, suppress=True, linewidth=120):
                 # print("Left buffer data:\n{}".format(field[0, num_halo:-num_halo, num_halo:2 * num_halo])) 
@@ -301,12 +304,12 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
     #         plt.savefig('out_field_{}{}.png'.format(tile, '_verify' if verify else ''))
     #         plt.close()
 
-    if plot_result or verify:
-        np.save('local_out_field_{}-{}_{}{}'.format(tile, local_rank, rank, '_verify' if verify else ''), out_field)
+    if plot_result:
+        np.save('local_out_field_{}-{}_{}'.format(tile, local_rank, rank), out_field[:, num_halo:-num_halo, num_halo:-num_halo])
         plt.ioff()
-        plt.imshow(out_field[out_field.shape[0] // 2, :, :], origin='lower')
+        plt.imshow(out_field[out_field.shape[0] // 2, num_halo:-num_halo, num_halo:-num_halo], origin='lower')
         plt.colorbar()
-        plt.savefig('local_out_field_{}-{}_{}{}'.format(tile, local_rank, rank, '_verify' if verify else ''))
+        plt.savefig('local_out_field_{}-{}_{}'.format(tile, local_rank, rank))
         plt.close()
 
 
