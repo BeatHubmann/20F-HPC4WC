@@ -311,13 +311,40 @@ class CubedSpherePartitioner(object):
                 self.__domain[2] - self.__num_halo, self.__domain[3] - self.__num_halo]
 
 
+    # def __setup_grid(self):
+    #     """Distribute ranks onto a Cartesian grid of workers"""
+    #     for ranks_x in range(math.floor( math.sqrt(self.__ranks_per_tile) ), 0, -1):
+    #         if self.__ranks_per_tile % ranks_x == 0:
+    #             break
+    #     return (self.__ranks_per_tile // ranks_x, ranks_x)
+
     def __setup_grid(self):
         """Distribute ranks onto a Cartesian grid of workers"""
-        for ranks_x in range(math.floor( math.sqrt(self.__ranks_per_tile) ), 0, -1):
-            if self.__ranks_per_tile % ranks_x == 0:
-                break
-        return (self.__ranks_per_tile // ranks_x, ranks_x)
+        return (self.__ranks_per_axis, self.__ranks_per_axis)
     
+
+    # def __setup_domain(self, shape, num_halo):
+    #     """Distribute the points of the computational grid onto the Cartesian grid of workers"""
+    #     assert len(shape) == 3, "Must pass a 3-dimensional shape"
+    #     size_z = shape[0]
+    #     size_y = self.__distribute_to_bins(shape[1], self.__size[0])
+    #     size_x = self.__distribute_to_bins(shape[2], self.__size[1])
+
+    #     pos_y = self.__cumsum(size_y, initial_value=num_halo)
+    #     pos_x = self.__cumsum(size_x, initial_value=num_halo)
+
+    #     domains = []
+    #     shapes = []
+    #     for rank in range(self.__ranks_per_tile):
+    #         pos = self.__rank_to_position(rank)
+    #         domains += [[ pos_y[pos[0]] - num_halo, pos_x[pos[1]] - num_halo, \
+    #                       pos_y[pos[0] + 1] + num_halo, pos_x[pos[1] + 1] + num_halo ]]
+    #         shapes += [[ size_z, domains[rank][2] - domains[rank][0], \
+    #                              domains[rank][3] - domains[rank][1] ]]
+    #     self.__domains, self.__shapes =  domains, shapes
+        
+    #     self.__domain, self.__shape = domains[self.__local_rank], shapes[self.__local_rank]
+    #     self.__max_shape = self.__find_max_shape( self.__shapes )
 
     def __setup_domain(self, shape, num_halo):
         """Distribute the points of the computational grid onto the Cartesian grid of workers"""
@@ -334,28 +361,38 @@ class CubedSpherePartitioner(object):
         for rank in range(self.__ranks_per_tile):
             pos = self.__rank_to_position(rank)
             domains += [[ pos_y[pos[0]] - num_halo, pos_x[pos[1]] - num_halo, \
-                          pos_y[pos[0] + 1] + num_halo, pos_x[pos[1] + 1] + num_halo ]]
+                            pos_y[pos[0] + 1] + num_halo, pos_x[pos[1] + 1] + num_halo ]]
             shapes += [[ size_z, domains[rank][2] - domains[rank][0], \
-                                 domains[rank][3] - domains[rank][1] ]]
+                                    domains[rank][3] - domains[rank][1] ]]
         self.__domains, self.__shapes =  domains, shapes
         
         self.__domain, self.__shape = domains[self.__local_rank], shapes[self.__local_rank]
         self.__max_shape = self.__find_max_shape( self.__shapes )
 
 
+
+    # def __distribute_to_bins(self, number, bins):
+    #     """Distribute a number of elements to a number of bins"""
+    #     n = number // bins
+    #     bin_size = [n] * bins
+    #     # make bins in the middle slightly larger
+    #     extend = number - n * bins
+    #     if extend > 0:
+    #         start_extend = bins // 2 - extend // 2
+    #         bin_size[start_extend:start_extend + extend] = \
+    #             [ n + 1 for n in bin_size[start_extend:start_extend + extend] ]
+    #     return bin_size
+
     def __distribute_to_bins(self, number, bins):
         """Distribute a number of elements to a number of bins"""
+        assert (number % bins == 0), 'Domain size must be divisible by ranks per coordinate axis'
         n = number // bins
         bin_size = [n] * bins
-        # make bins in the middle slightly larger
-        extend = number - n * bins
-        if extend > 0:
-            start_extend = bins // 2 - extend // 2
-            bin_size[start_extend:start_extend + extend] = \
-                [ n + 1 for n in bin_size[start_extend:start_extend + extend] ]
         return bin_size
 
-    
+
+
+
     def __cumsum(self, array, initial_value=0):
         """Cumulative sum with an optional initial value (default is zero)"""
         cumsum = [initial_value]
