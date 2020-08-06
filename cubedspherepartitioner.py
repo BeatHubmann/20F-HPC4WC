@@ -144,7 +144,8 @@ class CubedSpherePartitioner(object):
         """Return dictionary: Required positive 90 degree halo rotations to match neighbor's halo orientation"""
         neighbor_tiles = tile_neighbors[tile]
         neighbor_tiles_rotations = {v[0]: v[1] for v in neighbor_tiles.values()}
-        return {v: 0 if tile == rank2tile[k] else ((4-neighbor_tiles_rotations[rank2tile[k]])%4) 
+        # return {v: 0 if tile == rank2tile[k] else ((4-neighbor_tiles_rotations[rank2tile[k]])%4) 
+        return {v: 0 if tile == rank2tile[k] else neighbor_tiles_rotations[rank2tile[k]] 
                 for v, k in rank_neighbors.items()}
 
 
