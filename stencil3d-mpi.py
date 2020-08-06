@@ -102,10 +102,10 @@ def update_halo( field, num_halo, p=None ):
     l_sndbuf = np.rot90(field[:, num_halo:-num_halo, num_halo:2 * num_halo],
                         p.rot_halo_left(),
                         axes=(1,2)).copy()
-    # if p.global_rank() == 0:
-    #     with np.printoptions(precision=3, suppress=True, linewidth=120):
-    #         print("Left buffer data:\n{}".format(field[0, num_halo:-num_halo, num_halo:2 * num_halo])) 
-    #         print("l_sndbuf:\n{}".format(l_sndbuf[0]))
+    if p.global_rank() == 4:
+         with np.printoptions(precision=5, suppress=True, linewidth=120):
+             # print("Left buffer data:\n{}".format(field[0, num_halo:-num_halo, num_halo:2 * num_halo])) 
+             print("l_sndbuf:\n{}".format(l_sndbuf[0]))
     reqs_send.append(p.comm().Isend(l_sndbuf, dest = p.left()))    
     r_sndbuf = np.rot90(field[:, num_halo:-num_halo, -2 * num_halo:-num_halo],
                         p.rot_halo_right(),
@@ -115,11 +115,18 @@ def update_halo( field, num_halo, p=None ):
     # wait and unpack
     for req in reqs_recv:
         req.wait()
+
+    
     field[:,         0: num_halo, num_halo:-num_halo] = b_rcvbuf
     field[:, -num_halo:         , num_halo:-num_halo] = t_rcvbuf
     field[:,  num_halo:-num_halo,        0: num_halo] = l_rcvbuf
     field[:,  num_halo:-num_halo,-num_halo:         ] = r_rcvbuf
-    
+
+    if p.global_rank() == 1:
+         with np.printoptions(precision=5, suppress=True, linewidth=120):
+             # print("Left buffer data:\n{}".format(field[0, num_halo:-num_halo, num_halo:2 * num_halo])) 
+             print("r_rcvbuf:\n{}".format(r_rcvbuf[0]))
+             print("inserted:\n{}".format( field[0,  num_halo:-num_halo,-num_halo:]))
     # wait for sends to complete
     for req in reqs_send:
         req.wait()
@@ -203,7 +210,7 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
     #     num_iter = 1
 
     if local_rank == 0:
-        f = np.zeros( (nz, ny + 2 * num_halo, nx + 2 * num_halo) )
+        f = np.ones( (nz, ny + 2 * num_halo, nx + 2 * num_halo) )
         if verify:
             test_grid = np.add(*np.mgrid[0:ny*10:10, 0:nx])
             f[:, num_halo:-num_halo, num_halo:-num_halo] = test_grid
@@ -227,7 +234,7 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
 
     # to have a rank indication when inspecting fields for verification/diagnostics:
     if verify:
-        in_field += (local_rank + 1) / 1000
+        in_field += (rank / 1e2 + local_rank / 1e4)
 
     out_field = np.copy( in_field )
 
