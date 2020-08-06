@@ -279,14 +279,11 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
 
     # halo exchange correctness verification:
     if verify:
-        pass
-
-
-    for r in [0,1,2,3]:
-        if p.global_rank() == r:
-            with np.printoptions(precision=5, suppress=True, linewidth=120):
-                # print("Left buffer data:\n{}".format(field[0, num_halo:-num_halo, num_halo:2 * num_halo])) 
-                print("rank {} out_field:\n{}".format(r,np.flipud(out_field[0,:,:])))
+        # write to standard output if arrays small enough:
+        if nx < 10:
+            for r in range(p.__rank_per_tile):                                
+                with np.printoptions(precision=3, suppress=True, linewidth=120):
+                    print("global rank {} local rank {} subtile after one halo exchange:\n{}".format(rank, r,np.flipud(out_field[0,:,:])))
 
 
     # f = p.gather(out_field)
