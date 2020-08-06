@@ -177,7 +177,18 @@ def apply_diffusion( in_field, out_field, alpha, num_halo, num_iter=1, p=None ):
         if n < num_iter - 1:
             in_field, out_field = out_field, in_field
 
-            
+
+def verify_halo_exchange(field, rank, num_halo, p):
+    """Checks halo correctness after initial halo exchange during verification"""
+    # Bottom halo:
+    print(field[:, :num_halo, num_halo:-num_halo] )
+
+    # write to standard output if arrays small enough:
+    if field.size[1] < 13:
+        with np.printoptions(precision=3, suppress=True, linewidth=120):
+            print("global rank {}, tile {}, local rank {}: Subtile after one halo exchange:\n{}".format(rank, local_rank, p.tile(), np.flipud(out_field[0,:,:])))
+    
+
 @click.command()
 @click.option('--nx', type=int, required=True, help='Number of gridpoints in x-direction')
 @click.option('--ny', type=int, required=True, help='Number of gridpoints in y-direction')
@@ -275,11 +286,10 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
 
     # halo exchange correctness verification:
     if verify:
-        # write to standard output if arrays small enough:
-        if nx < 10:
-            with np.printoptions(precision=3, suppress=True, linewidth=120):
-                print("global rank {}, tile {}, local rank {}: Subtile after one halo exchange:\n{}".format(rank, local_rank, p.tile(), np.flipud(out_field[0,:,:])))
-	
+        verify_halo_exchange(out_field, rank, num_halo, p)
+        comm.Barrier()
+        if rank == 0:
+            print(80 * '*' + '\n All halo exchange tests passed!\n' + 80 * '*')
 
     # f = p.gather(out_field)
     # if local_rank == 0:
