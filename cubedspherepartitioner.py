@@ -74,88 +74,6 @@ class CubedSpherePartitioner(object):
         self.__setup_domain(domain, num_halo)
 
 
-    def __rank_global2local(self):
-        """Return local tile rank based on global rank, ranks per tile"""
-        return self.__global_rank % self.__ranks_per_tile
-
-
-    def __rank_local2global(self, tile):
-        """Return global rank based on local tile rank, tile number (1-based), ranks per tile"""
-        return self.__local_rank + self.__ranks_per_tile * (tile - 1)
-
-
-    def __assign_ranks_tiles(self, num_ranks, ranks_per_tile):
-        """Return dictionaries: rank->tile, tile->[ranks], tile->root rank"""
-        rank2tile = {i: (i // ranks_per_tile) + 1 for i in range(num_ranks)} # 1-based tile numbering
-        tile2ranks = dict()
-        for k, v in rank2tile.items():
-            tile2ranks.setdefault(v, list()).append(k)
-        tile2root = {v: k[0] for v, k in tile2ranks.items()}
-        return rank2tile, tile2ranks, tile2root
-    
-
-    def __assign_tile_neighbors(self):
-        """Return dictionary: tile, direction->neighbor tile, number of relative positive 90 degree coordinate rotations"""
-        tile_neighbors = {1: {'U': [3, 1], 'D': [6, 0], 'L': [5, 3], 'R': [2, 0]},
-                          2: {'U': [3, 0], 'D': [6, 1], 'L': [1, 0], 'R': [4, 3]},
-                          3: {'U': [5, 1], 'D': [2, 0], 'L': [1, 3], 'R': [4, 0]},
-                          4: {'U': [5, 0], 'D': [2, 1], 'L': [3, 0], 'R': [6, 3]},
-                          5: {'U': [1, 1], 'D': [4, 0], 'L': [3, 3], 'R': [6, 0]},
-                          6: {'U': [1, 0], 'D': [4, 1], 'L': [5, 0], 'R': [2, 3]}}
-        # Sanity checks (comment out for production, only works in Python 3.8) ----------
-        # assert tile_neighbors[1]['L'][0] == tile_neighbors[6]['L'][0] == tile_neighbors[4]['U'][0], 'Cube geometry faulty'
-        # assert tile_neighbors[6]['D'][0] == tile_neighbors[2]['R'][0] == tile_neighbors[3]['R'][0], 'Cube geometry faulty' 
-        # assert tile_neighbors[3]['U'][0] == tile_neighbors[6]['L'][0] == tile_neighbors[1]['L'][0], 'Cube geometry faulty'
-        # for i in range(6):
-        #     rotation_sum = 0
-        #     [rotation_sum := rotation_sum + k[1] for v, k in tile_neighbors[i+1].items()]
-        #     assert rotation_sum == 4, 'Cube geometry faulty' 
-        # End sanity checks------------------------------------
-        return tile_neighbors
-
-
-    def __calculate_rank_grid(self, tile, tile2ranks, ranks_per_axis, rotation=0):
-            """Return rotated array containing square grid of tile's global ranks"""
-            return np.rot90(np.flipud(np.asarray(tile2ranks[tile]).reshape(ranks_per_axis, -1)), rotation)
-
-
-    def __assign_rank_grid(self, tile, tile2ranks, tile_neighbors, ranks_per_axis):
-        """Return dictionary of arrays containing all neighboring tiles' placements of global ranks
-           and whether their bordering coordinate orientation is flipped with regard to center tile"""
-        rank_grid = {tile: self.__calculate_rank_grid(tile, tile2ranks, ranks_per_axis)}
-        for k, v in tile_neighbors[tile].items():
-            rank_grid[k] = self.__calculate_rank_grid(v[0], tile2ranks, ranks_per_axis, v[1])
-        return rank_grid
-
-
-    def __assign_rank_neighbors(self, global_rank, rank_grid, tile):
-        """Return dictionary: global rank->global neighbor ranks"""
-        up_down_grid = np.vstack((rank_grid['U'], rank_grid[tile], rank_grid['D']))
-        left_right_grid = np.hstack((rank_grid['L'], rank_grid[tile], rank_grid['R']))
-        y_up_down_grid, x_up_down_grid = np.where(up_down_grid == global_rank)
-        y_left_right_grid, x_left_right_grid = np.where(left_right_grid == global_rank)
-        return {'U': up_down_grid[(y_up_down_grid-1, x_up_down_grid)].item(),
-                'D': up_down_grid[(y_up_down_grid+1, x_up_down_grid)].item(),
-                'L': left_right_grid[(y_left_right_grid, x_left_right_grid-1)].item(),
-                'R': left_right_grid[(y_left_right_grid, x_left_right_grid+1)].item()}
-
-
-    def __assign_neighbor_halo_rotations(self, tile, rank2tile, tile_neighbors, rank_neighbors):
-        """Return dictionary: Required positive 90 degree halo rotations to match neighbor's halo orientation"""
-        neighbor_tiles = tile_neighbors[tile]
-        neighbor_tiles_rotations = {v[0]: v[1] for v in neighbor_tiles.values()}
-        # return {v: 0 if tile == rank2tile[k] else ((4-neighbor_tiles_rotations[rank2tile[k]])%4) 
-        return {v: 0 if tile == rank2tile[k] else neighbor_tiles_rotations[rank2tile[k]] 
-                for v, k in rank_neighbors.items()}
-
-
-    def __split_tile_comm(self, comm, tile, global_rank):
-        """Return local tile communicator split from comm using tile as color"""
-        tile_comm = comm.Split(tile, global_rank)
-        assert self.__local_rank == tile_comm.Get_rank(), "Check calculated local rank vs. MPI local rank"
-        return tile_comm
-
-
     def comm(self):
         """Returns the MPI communicator used to setup this partitioner"""
         return self.__comm    
@@ -309,6 +227,87 @@ class CubedSpherePartitioner(object):
         """Return position of subdomain without halo on the global domain"""
         return [self.__domain[0] + self.__num_halo, self.__domain[1] + self.__num_halo, \
                 self.__domain[2] - self.__num_halo, self.__domain[3] - self.__num_halo]
+
+
+    def __rank_global2local(self):
+        """Return local tile rank based on global rank, ranks per tile"""
+        return self.__global_rank % self.__ranks_per_tile
+
+
+    def __rank_local2global(self, tile):
+        """Return global rank based on local tile rank, tile number (1-based), ranks per tile"""
+        return self.__local_rank + self.__ranks_per_tile * (tile - 1)
+
+
+    def __assign_ranks_tiles(self, num_ranks, ranks_per_tile):
+        """Return dictionaries: rank->tile, tile->[ranks], tile->root rank"""
+        rank2tile = {i: (i // ranks_per_tile) + 1 for i in range(num_ranks)} # 1-based tile numbering
+        tile2ranks = dict()
+        for k, v in rank2tile.items():
+            tile2ranks.setdefault(v, list()).append(k)
+        tile2root = {v: k[0] for v, k in tile2ranks.items()}
+        return rank2tile, tile2ranks, tile2root
+    
+
+    def __assign_tile_neighbors(self):
+        """Return dictionary: tile, direction->neighbor tile, number of relative positive 90 degree coordinate rotations"""
+        tile_neighbors = {1: {'U': [3, 1], 'D': [6, 0], 'L': [5, 3], 'R': [2, 0]},
+                          2: {'U': [3, 0], 'D': [6, 1], 'L': [1, 0], 'R': [4, 3]},
+                          3: {'U': [5, 1], 'D': [2, 0], 'L': [1, 3], 'R': [4, 0]},
+                          4: {'U': [5, 0], 'D': [2, 1], 'L': [3, 0], 'R': [6, 3]},
+                          5: {'U': [1, 1], 'D': [4, 0], 'L': [3, 3], 'R': [6, 0]},
+                          6: {'U': [1, 0], 'D': [4, 1], 'L': [5, 0], 'R': [2, 3]}}
+        # Sanity checks - comment out for production on Daint as it only works for Python 3.8 (not on Daint as of Aug20) ---
+        # assert tile_neighbors[1]['L'][0] == tile_neighbors[6]['L'][0] == tile_neighbors[4]['U'][0], 'Cube geometry faulty'
+        # assert tile_neighbors[6]['D'][0] == tile_neighbors[2]['R'][0] == tile_neighbors[3]['R'][0], 'Cube geometry faulty' 
+        # assert tile_neighbors[3]['U'][0] == tile_neighbors[6]['L'][0] == tile_neighbors[1]['L'][0], 'Cube geometry faulty'
+        # for i in range(6):
+        #     rotation_sum = 0
+        #     [rotation_sum := rotation_sum + k[1] for v, k in tile_neighbors[i+1].items()]
+        #     assert rotation_sum == 4, 'Cube geometry faulty' 
+        # ------------------------------------------------------------------------------------------------------------------
+        return tile_neighbors
+
+
+    def __calculate_rank_grid(self, tile, tile2ranks, ranks_per_axis, rotation=0):
+            """Return rotated array containing square grid of tile's global ranks"""
+            return np.rot90(np.flipud(np.asarray(tile2ranks[tile]).reshape(ranks_per_axis, -1)), rotation)
+
+
+    def __assign_rank_grid(self, tile, tile2ranks, tile_neighbors, ranks_per_axis):
+        """Return dictionary of arrays containing all neighboring tiles' placements of global ranks
+           and whether their bordering coordinate orientation is flipped with regard to center tile"""
+        rank_grid = {tile: self.__calculate_rank_grid(tile, tile2ranks, ranks_per_axis)}
+        for k, v in tile_neighbors[tile].items():
+            rank_grid[k] = self.__calculate_rank_grid(v[0], tile2ranks, ranks_per_axis, v[1])
+        return rank_grid
+
+
+    def __assign_rank_neighbors(self, global_rank, rank_grid, tile):
+        """Return dictionary: global rank->global neighbor ranks"""
+        up_down_grid = np.vstack((rank_grid['U'], rank_grid[tile], rank_grid['D']))
+        left_right_grid = np.hstack((rank_grid['L'], rank_grid[tile], rank_grid['R']))
+        y_up_down_grid, x_up_down_grid = np.where(up_down_grid == global_rank)
+        y_left_right_grid, x_left_right_grid = np.where(left_right_grid == global_rank)
+        return {'U': up_down_grid[(y_up_down_grid-1, x_up_down_grid)].item(),
+                'D': up_down_grid[(y_up_down_grid+1, x_up_down_grid)].item(),
+                'L': left_right_grid[(y_left_right_grid, x_left_right_grid-1)].item(),
+                'R': left_right_grid[(y_left_right_grid, x_left_right_grid+1)].item()}
+
+
+    def __assign_neighbor_halo_rotations(self, tile, rank2tile, tile_neighbors, rank_neighbors):
+        """Return dictionary: Required positive 90 degree halo rotations to match neighbor's halo orientation"""
+        neighbor_tiles = tile_neighbors[tile]
+        neighbor_tiles_rotations = {v[0]: v[1] for v in neighbor_tiles.values()}
+        return {v: 0 if tile == rank2tile[k] else neighbor_tiles_rotations[rank2tile[k]] 
+                for v, k in rank_neighbors.items()}
+
+
+    def __split_tile_comm(self, comm, tile, global_rank):
+        """Return local tile communicator split from comm using tile as color"""
+        tile_comm = comm.Split(tile, global_rank)
+        assert self.__local_rank == tile_comm.Get_rank(), "Check calculated local rank vs. MPI local rank"
+        return tile_comm
 
 
     def __setup_grid(self):

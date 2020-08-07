@@ -67,7 +67,7 @@ def update_halo( field, num_halo, p=None ):
     Note: corners are still TO BE DEALT WITH
     """
 
-    comm = MPI.COMM_WORLD
+    # comm = MPI.COMM_WORLD
 
     reqs_recv, reqs_send = [], []
 
@@ -140,9 +140,9 @@ def apply_diffusion( in_field, out_field, alpha, num_halo, num_iter=1, p=None ):
         laplacian( tmp_field, out_field, num_halo=num_halo, extend=0 )
 
         # DEBUG:
-        if p.global_rank() == 0 and n % 10 == 0:
-            with np.printoptions(precision=3, suppress=True, linewidth=120):
-                print('Max in_field = {} at {}'.format(np.amax(in_field[0]), np.where(in_field[0] == np.amax(in_field[0]))))
+        # if p.global_rank() == 0 and n % 10 == 0:
+        #     with np.printoptions(precision=3, suppress=True, linewidth=120):
+        #         print('Max in_field = {} at {}'.format(np.amax(in_field[0]), np.where(in_field[0] == np.amax(in_field[0]))))
 
         out_field[:, num_halo:-num_halo, num_halo:-num_halo] = \
             in_field[:, num_halo:-num_halo, num_halo:-num_halo] \
@@ -155,7 +155,7 @@ def apply_diffusion( in_field, out_field, alpha, num_halo, num_iter=1, p=None ):
 def check_halo(halo, neighbor, tolerance=1e-4):
     """Checks if halo originates from neighbor and its proper orientation in y- and x-axis""" 
     halo_int = halo.astype(int)
-    return np.all(np.isclose(halo - neighbor / 1000, halo_int, tolerance)) and \
+    return np.all(np.isclose(halo - neighbor * 1e-3, halo_int, tolerance)) and \
            np.all(np.diff(halo, axis=1) > 0) and \
            np.all(np.diff(halo, axis=2) > 0)
 
@@ -240,7 +240,7 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
     # rank encoded in the 3 decimal places right of the decimal separator
     if verify:
         local_ny, local_nx = in_field.shape[1:]
-        test_grid = np.add(*np.mgrid[0:(local_ny - 2 * num_halo) * 100:100, 0:(local_nx - 2 * num_halo)]) + rank / 1e3 
+        test_grid = np.add(*np.mgrid[0:(local_ny - 2 * num_halo) * 100:100, 0:(local_nx - 2 * num_halo)]) + rank * 1e-3 
         in_field[:, num_halo:-num_halo, num_halo:-num_halo] = test_grid	
 
     out_field = np.copy( in_field )
@@ -259,20 +259,20 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
         apply_diffusion( in_field, out_field, alpha, num_halo, p=p )
 
         comm.Barrier()
-        
-        # time the actual work
+        # time the actual work --------------------------------------------------------
         tic = time.time()
         apply_diffusion( in_field, out_field, alpha, num_halo, num_iter=num_iter, p=p )
         toc = time.time()
-        
+        # -----------------------------------------------------------------------------
         comm.Barrier()
         
         if rank == 0:
-            print("Elapsed time for work = {} s".format(toc - tic) )
+            print("nz = {:>3}, ny = {:>3}, nx = {:>3}; iter = {:>4}, ranks = {:>3} // Elapsed time for work = {:>9.4f} s".format(nz, ny, nx,
+                num_iter, comm.Get_size(), toc - tic))
 
     update_halo(out_field, num_halo, p)
 
-    # halo exchange correctness verification:
+    # halo exchange correctness verification after initial update_halo():
     if verify:
         verify_halo_exchange(out_field, rank, local_rank, tile, num_halo, p)
         if rank == 0:
