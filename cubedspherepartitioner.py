@@ -35,9 +35,9 @@ class CubedSpherePartitioner(object):
         self.__global_rank = comm.Get_rank()
         self.__num_ranks = comm.Get_size()
 
-        assert self.__num_ranks % 6 == 0, "Number of ranks must be = 6 * x * x where x is even"
+        assert self.__num_ranks % 6 == 0, "Number of ranks must be divisible by 6 for cube topology"
         assert self.__num_ranks == 6 or math.sqrt(self.__num_ranks / 6).is_integer(), \
-            "Number of ranks per face must be square of an even number or one"
+            "Number of ranks per face must be square of an integer"
         
         self.__ranks_per_tile = self.__num_ranks // 6
         self.__ranks_per_axis = int(math.sqrt(self.__ranks_per_tile))

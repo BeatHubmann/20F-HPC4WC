@@ -44,16 +44,16 @@ def laplacian( in_field, lap_field, num_halo, extend=0 ):
 
     # fix missing stencil info from zero-ed halo corners:
     if extend > 0:
-        # bottom-left
+        # bottom-left:
         lap_field[:, jb, num_halo] += in_field[:, num_halo, ib] # lap_field(-1, 0) += in_field( 0,-1)
         lap_field[:, num_halo, ib] += in_field[:, jb, num_halo] # lap_field( 0,-1) += in_field(-1, 0)
-        # bottom-right
+        # bottom-right:
         lap_field[:, jb, -num_halo] += in_field[:, num_halo, ie] # lap_field(-1, nx-1) += in_field( 0, nx  ) 
         lap_field[:, num_halo, ie] += in_field[:, jb, -num_halo] # lap_field( 0, nx  ) += in_field(-1, nx-1)  
-        # top-left
+        # top-left:
         lap_field[:, je, num_halo] += in_field[:, -num_halo, ib] # lap_field(ny  , 0) += in_field(ny-1,-1) 
         lap_field[:, -num_halo, ib] += in_field[:, je, num_halo] # lap_field(ny-1,-1) += in_field(ny  , 0)  
-        # top-right
+        # top-right:
         lap_field[:, je, -num_halo] += in_field[:, -num_halo, ie] # lap_field(ny  , nx-1) += in_field(ny-1, nx  )  
         lap_field[:, -num_halo, ie] += in_field[:, je, -num_halo] # lap_field(ny-1, nx  ) += in_field(ny  , nx-1)
 
@@ -67,19 +67,19 @@ def update_halo( field, num_halo, p=None ):
 
     reqs_recv, reqs_send = [], []
 
-    # allocate recv buffers and pre-post the receives (top and bottom edge, without corners)
+    # allocate recv buffers and pre-post the receives (top and bottom edge, without corners):
     b_rcvbuf = np.empty_like(field[:, 0:num_halo, num_halo:-num_halo])
     reqs_recv.append(p.comm().Irecv(b_rcvbuf, source = p.bottom()))
     t_rcvbuf = np.empty_like(field[:, -num_halo:, num_halo:-num_halo])
     reqs_recv.append(p.comm().Irecv(t_rcvbuf, source = p.top()))
-    # allocate recv buffers and pre-post the receives (left and right edge, without corners)
+    # allocate recv buffers and pre-post the receives (left and right edge, without corners):
     l_rcvbuf = np.empty_like(field[:, num_halo:-num_halo:, 0:num_halo])
     reqs_recv.append(p.comm().Irecv(l_rcvbuf, source = p.left()))
     r_rcvbuf = np.empty_like(field[:, num_halo:-num_halo, -num_halo:])
     reqs_recv.append(p.comm().Irecv(r_rcvbuf, source = p.right()))
 
     # rotate to fit receiver's halo orientation, then
-    # pack and send (top and bottom edge, without corners)
+    # pack and send (top and bottom edge, without corners):
     b_sndbuf = np.rot90(field[:, num_halo:2 * num_halo, num_halo:-num_halo],
                         p.rot_halo_bottom(),
                         axes=(1,2)).copy()
@@ -90,7 +90,7 @@ def update_halo( field, num_halo, p=None ):
     reqs_send.append(p.comm().Isend(t_sndbuf, dest = p.top()))
 
     # rotate to fit receiver's halo orientation, then
-    # pack and send (left and right edge, without corners)
+    # pack and send (left and right edge, without corners):
     l_sndbuf = np.rot90(field[:, num_halo:-num_halo, num_halo:2 * num_halo],
                         p.rot_halo_left(),
                         axes=(1,2)).copy()
@@ -100,7 +100,7 @@ def update_halo( field, num_halo, p=None ):
                         axes=(1,2)).copy()
     reqs_send.append(p.comm().Isend(r_sndbuf, dest = p.right()))
        
-    # wait and unpack
+    # wait and unpack:
     for req in reqs_recv:
         req.wait()
     
@@ -109,7 +109,7 @@ def update_halo( field, num_halo, p=None ):
     field[:,  num_halo:-num_halo,        0: num_halo] = l_rcvbuf
     field[:,  num_halo:-num_halo,-num_halo:         ] = r_rcvbuf
 
-    # wait for sends to complete
+    # wait for sends to complete:
     for req in reqs_send:
         req.wait()
             
@@ -137,22 +137,22 @@ def apply_diffusion( in_field, out_field, alpha, num_halo, num_iter=1, p=None, s
             # apply smoothing filter to corner halo points to dampen numerical corner errors:
             jcb = icb = num_halo
             jce = ice = -num_halo - 1
-            # bottom-left
+            # bottom-left:
             avg = ( in_field[:, jcb  , icb  ] \
                     + in_field[:, jcb  , icb-1] \
                     + in_field[:, jcb-1, icb  ] ) / 3.
             in_field[:, jcb-1, icb-1] = avg
-            # bottom-right
+            # bottom-right:
             avg = ( in_field[:, jcb  , ice  ] \
                     + in_field[:, jcb  , ice+1] \
                     + in_field[:, jcb-1, ice  ] ) / 3.
             in_field[:, jcb-1, ice+1] = avg
-            # top-left
+            # top-left:
             avg = ( in_field[:, jce  , icb  ] \
                     + in_field[:, jce  , icb-1] \
                     + in_field[:, jce+1, icb  ] ) / 3.
             in_field[:, jce+1, icb-1] = avg
-            #top-right
+            # top-right:
             avg = ( in_field[:, jce  , ice  ] \
                     + in_field[:, jce  , ice+1] \
                     + in_field[:, jce+1, ice  ] ) / 3.
@@ -204,7 +204,7 @@ def verify_halo_exchange(field, rank, local_rank, tile, num_halo, p):
                  axes=(2,1))
     assert check_halo(right_halo, p.right()), 'Right halo exchange on tile {}, rank {} faulty'.format(tile, rank)
 
-    # write to standard output for visual diagnostics if arrays small enough:
+    # write to standard output for visual diagnostics if fields are small enough:
     if field.shape[1] <= 12:
         with np.printoptions(precision=3, suppress=True, linewidth=120):
             print("global rank {}, local rank {}, tile {}: subtile after one halo exchange:\n{}\n".format(rank,
@@ -240,20 +240,22 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
     if local_rank == 0:
         f = np.zeros( (nz, ny + 2 * num_halo, nx + 2 * num_halo) )
         if not verify:
-            # Option 1: Like stencil2d-mpi during HPC4WC course:
+            # choose initial pattern to be diffused:
+            
+            # option 1: Like stencil2d-mpi during HPC4WC course:
             # f[nz // 4:3 * nz // 4, num_halo + ny // 4:num_halo + 3 * ny // 4, num_halo + nx // 4:num_halo + 3 * nx // 4] = 1.0
             
-            # Option 2: Similar to option 1, but positive region extended towards tile edges:
+            # option 2: Similar to option 1, but positive region extended towards tile edges:
             # f[nz // 10:9 * nz // 10, num_halo + ny // 10:num_halo + 9 * ny // 10, num_halo + nx // 10:num_halo + 9 * nx // 10] = 1.0
 
-            # Option 3: One positive region in bottom-left (0-0) corner, one positive region in top-right (ny-nx) corner:       
+            # option 3: One positive region in bottom-left (0-0) corner, one positive region in top-right (ny-nx) corner:       
             # f[nz // 4:3 * nz // 4, num_halo:num_halo + ny // 4, num_halo:num_halo + nx // 4] = 1.0
             # f[nz // 4:3 * nz // 4, num_halo + 3 * ny // 4:-num_halo, num_halo + 3 * nx // 4:-num_halo] = 1.0
 
-            # Option 4: Positive region line prime number fraction off-center across tile:
+            # option 4: Positive region line prime number fraction off-center across tile:
             f[nz // 4:3 * nz // 4, num_halo + ny // 7:num_halo + 2 * ny // 7, num_halo:-num_halo] = 1.0
 
-            # Option 5: Similar to option 3, but positive region value is rank- and position-flavored:
+            # option 5: Similar to option 3, but positive region value is rank- and position-flavored:
             # f[nz // 4:3 * nz // 4, num_halo:num_halo + ny // 4, num_halo:num_halo + nx // 4] = rank * 100 + 125
             # f[nz // 4:3 * nz // 4, num_halo + 3 * ny // 4:-num_halo, num_halo + 3 * nx // 4:-num_halo] = rank * 100 + 175
     else:
@@ -261,7 +263,7 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
     in_field = p.scatter(f)
 
     # add pattern increasing in steps of 100 in pos y-direction, steps of 1 in pos x-direction with
-    # rank encoded in the 3 decimal places right of the decimal separator
+    # rank encoded in the 3 decimal places right of the decimal separator:
     if verify:
         local_ny, local_nx = in_field.shape[1:]
         test_grid = np.add(*np.mgrid[100:(local_ny - 2 * num_halo + 1) * 100:100, 1:(local_nx - 2 * num_halo + 1)]) + rank * 1e-3 
@@ -279,11 +281,11 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
 
     # no diffusion performed for verification:
     if not verify:
-        # warmup caches
+        # warmup caches:
         apply_diffusion( in_field, out_field, alpha, num_halo, p=p )
 
         comm.Barrier()
-        # time the actual work --------------------------------------------------------
+        # time the actual work: -------------------------------------------------------
         tic = time.time()
         apply_diffusion( in_field, out_field, alpha, num_halo, num_iter=num_iter, p=p )
         toc = time.time()
