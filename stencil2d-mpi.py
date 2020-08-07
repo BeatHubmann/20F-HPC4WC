@@ -140,8 +140,19 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False):
 
     if rank == 0:
         f = np.zeros( (nz, ny + 2 * num_halo, nx + 2 * num_halo) )
+        # Option 1: Original stencil2d-mpi during HPC4WC course:
         # f[nz // 4:3 * nz // 4, num_halo + ny // 4:num_halo + 3 * ny // 4, num_halo + nx // 4:num_halo + 3 * nx // 4] = 1.0
-        f[nz // 10:9 * nz // 10, num_halo + ny // 10:num_halo + 9 * ny // 10, num_halo + nx // 10:num_halo + 9 * nx // 10] = 1.0
+
+        # Option 2: Similar to option 1, but positive region extended towards tile edges:
+        # f[nz // 10:9 * nz // 10, num_halo + ny // 10:num_halo + 9 * ny // 10, num_halo + nx // 10:num_halo + 9 * nx // 10] = 1.0
+
+        # Option 3: One positive region in bottom-left (0-0) corner, one positive region in top-right (ny-nx) corner         
+        # f[nz // 4:3 * nz // 4, num_halo:num_halo + ny // 4, num_halo:num_halo + nx // 4] = 1.0
+        # f[nz // 4:3 * nz // 4, num_halo + 3 * ny // 4:-num_halo, num_halo + 3 * nx // 4:-num_halo] = 1.0
+
+        # Option 4: Positive region line prime number fraction off-center across tile:
+        f[nz // 4:3 * nz // 4, num_halo + ny // 7:num_halo + 2 * ny // 7, num_halo:-num_halo] = 1.0
+
     else:
         f = np.empty(1)
     in_field = p.scatter(f)

@@ -42,7 +42,7 @@ def laplacian( in_field, lap_field, num_halo, extend=0 ):
                                       + in_field[:, jb - 1:je - 1, ib:ie] \
                                       + in_field[:, jb + 1:je + 1 if je != -1 else None, ib:ie] 
 
-    # fixing corners
+    # fix missing stencil info from zero-ed halo corners:
     if extend > 0:
         # bottom-left
         lap_field[:, jb, num_halo] += in_field[:, num_halo, ib] # lap_field(-1, 0) += in_field( 0,-1)
@@ -55,7 +55,7 @@ def laplacian( in_field, lap_field, num_halo, extend=0 ):
         lap_field[:, -num_halo, ib] += in_field[:, je, num_halo] # lap_field(ny-1,-1) += in_field(ny  , 0)  
         # top-right
         lap_field[:, je, -num_halo] += in_field[:, -num_halo, ie] # lap_field(ny  , nx-1) += in_field(ny-1, nx  )  
-        lap_field[:, -num_halo, ie] += in_field[:, je, -num_halo] # lap_field(ny-1, nx  ) += in_field(ny  , nx-1)   
+        lap_field[:, -num_halo, ie] += in_field[:, je, -num_halo] # lap_field(ny-1, nx  ) += in_field(ny  , nx-1)
 
 
 def update_halo( field, num_halo, p=None ):
@@ -63,11 +63,7 @@ def update_halo( field, num_halo, p=None ):
     
     field    -- input/output field (nz x ny x nx with halo in x- and y-direction)
     num_halo -- number of halo points
-    
-    Note: corners are still TO BE DEALT WITH
     """
-
-    # comm = MPI.COMM_WORLD
 
     reqs_recv, reqs_send = [], []
 
@@ -118,7 +114,7 @@ def update_halo( field, num_halo, p=None ):
         req.wait()
             
 
-def apply_diffusion( in_field, out_field, alpha, num_halo, num_iter=1, p=None ):
+def apply_diffusion( in_field, out_field, alpha, num_halo, num_iter=1, p=None, smoothing=True ):
     """Integrate 4th-order diffusion equation by a certain number of iterations.
     
     in_field  -- input field (nz x ny x nx with halo in x- and y-direction)
@@ -128,6 +124,7 @@ def apply_diffusion( in_field, out_field, alpha, num_halo, num_iter=1, p=None ):
     Keyword arguments:
     num_iter  -- number of iterations to execute
     p -- responsible partitioner instance 
+    smoothing -- fix halo corner points using the three surrounding field points - unstable if False
     """
 
     tmp_field = np.zeros_like( in_field )
@@ -135,27 +132,51 @@ def apply_diffusion( in_field, out_field, alpha, num_halo, num_iter=1, p=None ):
     for n in range(num_iter):
         
         update_halo( in_field, num_halo, p )
-        
+
+        if smoothing:
+            # apply smoothing filter to corner halo points to dampen numerical corner errors:
+            jcb = icb = num_halo
+            jce = ice = -num_halo - 1
+            # bottom-left
+            avg = ( in_field[:, jcb  , icb  ] \
+                    + in_field[:, jcb  , icb-1] \
+                    + in_field[:, jcb-1, icb  ] ) / 3.
+            in_field[:, jcb-1, icb-1] = avg
+            # bottom-right
+            avg = ( in_field[:, jcb  , ice  ] \
+                    + in_field[:, jcb  , ice+1] \
+                    + in_field[:, jcb-1, ice  ] ) / 3.
+            in_field[:, jcb-1, ice+1] = avg
+            # top-left
+            avg = ( in_field[:, jce  , icb  ] \
+                    + in_field[:, jce  , icb-1] \
+                    + in_field[:, jce+1, icb  ] ) / 3.
+            in_field[:, jce+1, icb-1] = avg
+            #top-right
+            avg = ( in_field[:, jce  , ice  ] \
+                    + in_field[:, jce  , ice+1] \
+                    + in_field[:, jce+1, ice  ] ) / 3.
+            in_field[:, jce+1, ice+1] = avg 
+
         laplacian( in_field, tmp_field, num_halo=num_halo, extend=1 )
         laplacian( tmp_field, out_field, num_halo=num_halo, extend=0 )
-
-        # DEBUG:
-        # if p.global_rank() == 0 and n % 10 == 0:
-        #     with np.printoptions(precision=3, suppress=True, linewidth=120):
-        #         print('Max in_field = {} at {}'.format(np.amax(in_field[0]), np.where(in_field[0] == np.amax(in_field[0]))))
 
         out_field[:, num_halo:-num_halo, num_halo:-num_halo] = \
             in_field[:, num_halo:-num_halo, num_halo:-num_halo] \
             - alpha * out_field[:, num_halo:-num_halo, num_halo:-num_halo]
-        
+
         if n < num_iter - 1:
             in_field, out_field = out_field, in_field
 
 
 def check_halo(halo, neighbor, tolerance=1e-4):
-    """Checks if halo originates from neighbor and its proper orientation in y- and x-axis""" 
+    """Checks if 1) halo originates from neighbor
+                 2) halo does not contain any zero corner field elements indicating a faulty shift
+                 3) halo is properly oriented along increasing y-axis
+                 4) halo is properly oriented along increasing x-axis""" 
     halo_int = halo.astype(int)
     return np.all(np.isclose(halo - neighbor * 1e-3, halo_int, tolerance)) and \
+           np.all(halo_int > 0) and \
            np.all(np.diff(halo, axis=1) > 0) and \
            np.all(np.diff(halo, axis=2) > 0)
 
@@ -164,27 +185,27 @@ def verify_halo_exchange(field, rank, local_rank, tile, num_halo, p):
     """Checks halo correctness after initial halo exchange during verification"""
     # bottom halo:
     bottom_halo = np.rot90(field[:, :num_halo, num_halo:-num_halo],
-                   -p.rot_halo_bottom(),
-                   axes=(2,1))
+                  -p.rot_halo_bottom(),
+                  axes=(2,1))
     assert check_halo(bottom_halo, p.bottom()), 'Bottom halo exchange on tile {}, rank {} faulty'.format(tile, rank)
     # top halo:
     top_halo = np.rot90(field[:, -num_halo:, num_halo:-num_halo],
-                   -p.rot_halo_top(),
-                   axes=(2,1))
+               -p.rot_halo_top(),
+               axes=(2,1))
     assert check_halo(top_halo, p.top()), 'Top halo exchange on tile {}, rank {} faulty'.format(tile, rank)
     # left halo:
     left_halo = np.rot90(field[:, num_halo:-num_halo, :num_halo],
-                   -p.rot_halo_left(),
-                   axes=(2,1))
+                -p.rot_halo_left(),
+                axes=(2,1))
     assert check_halo(left_halo, p.left()), 'Left halo exchange on tile {}, rank {} faulty'.format(tile, rank)
     # right halo:
     right_halo = np.rot90(field[:, num_halo:-num_halo, -num_halo:],
-                   -p.rot_halo_right(),
-                   axes=(2,1))
+                 -p.rot_halo_right(),
+                 axes=(2,1))
     assert check_halo(right_halo, p.right()), 'Right halo exchange on tile {}, rank {} faulty'.format(tile, rank)
 
     # write to standard output for visual diagnostics if arrays small enough:
-    if field.shape[1] < 13:
+    if field.shape[1] <= 12:
         with np.printoptions(precision=3, suppress=True, linewidth=120):
             print("global rank {}, local rank {}, tile {}: subtile after one halo exchange:\n{}\n".format(rank,
                 local_rank, p.tile(), np.flipud(field[0,:,:])))
@@ -225,11 +246,14 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
             # Option 2: Similar to option 1, but positive region extended towards tile edges:
             # f[nz // 10:9 * nz // 10, num_halo + ny // 10:num_halo + 9 * ny // 10, num_halo + nx // 10:num_halo + 9 * nx // 10] = 1.0
 
-            # Option 3: One positive region in bottom-left (0-0) corner, one positive region in top-right (ny-nx) corner         
-            f[nz // 4:3 * nz // 4, num_halo:num_halo + ny // 4, num_halo:num_halo + nx // 4] = 1.0
-            f[nz // 4:3 * nz // 4, num_halo + 3 * ny // 4:-num_halo, num_halo + 3 * nx // 4:-num_halo] = 1.0
+            # Option 3: One positive region in bottom-left (0-0) corner, one positive region in top-right (ny-nx) corner:       
+            # f[nz // 4:3 * nz // 4, num_halo:num_halo + ny // 4, num_halo:num_halo + nx // 4] = 1.0
+            # f[nz // 4:3 * nz // 4, num_halo + 3 * ny // 4:-num_halo, num_halo + 3 * nx // 4:-num_halo] = 1.0
 
-            # Option 4: Similar to option 3, but positive region value is rank- and position-flavored:
+            # Option 4: Positive region line prime number fraction off-center across tile:
+            f[nz // 4:3 * nz // 4, num_halo + ny // 7:num_halo + 2 * ny // 7, num_halo:-num_halo] = 1.0
+
+            # Option 5: Similar to option 3, but positive region value is rank- and position-flavored:
             # f[nz // 4:3 * nz // 4, num_halo:num_halo + ny // 4, num_halo:num_halo + nx // 4] = rank * 100 + 125
             # f[nz // 4:3 * nz // 4, num_halo + 3 * ny // 4:-num_halo, num_halo + 3 * nx // 4:-num_halo] = rank * 100 + 175
     else:
@@ -240,7 +264,7 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
     # rank encoded in the 3 decimal places right of the decimal separator
     if verify:
         local_ny, local_nx = in_field.shape[1:]
-        test_grid = np.add(*np.mgrid[0:(local_ny - 2 * num_halo) * 100:100, 0:(local_nx - 2 * num_halo)]) + rank * 1e-3 
+        test_grid = np.add(*np.mgrid[100:(local_ny - 2 * num_halo + 1) * 100:100, 1:(local_nx - 2 * num_halo + 1)]) + rank * 1e-3 
         in_field[:, num_halo:-num_halo, num_halo:-num_halo] = test_grid	
 
     out_field = np.copy( in_field )
