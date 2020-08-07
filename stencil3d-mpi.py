@@ -178,15 +178,71 @@ def apply_diffusion( in_field, out_field, alpha, num_halo, num_iter=1, p=None ):
             in_field, out_field = out_field, in_field
 
 
-def verify_halo_exchange(field, rank, num_halo, p):
+def check_halo(halo, neighbor, tolerance=1e-4):
+    """Checks if halo originates from neighbor and its proper orientation in y- and x-axis""" 
+    halo_int = halo.astype(int)
+   # print(halo)
+   # print(halo_int)
+   # print(np.all(np.isclose(halo - neighbor / 1000, halo_int, tolerance)))
+   # print(np.all(np.diff(halo, axis=1) > 0)) 
+   # print(np.all(np.diff(halo, axis=2) > 0))
+    return np.all(np.isclose(halo - neighbor / 1000, halo_int, tolerance)) and \
+           np.all(np.diff(halo, axis=1) > 0) and \
+           np.all(np.diff(halo, axis=2) > 0)
+
+
+def verify_halo_exchange(field, rank, local_rank, tile, num_halo, p):
     """Checks halo correctness after initial halo exchange during verification"""
     # Bottom halo:
-    print(field[:, :num_halo, num_halo:-num_halo] )
-
+    bottom_halo = np.rot90(field[:, :num_halo, num_halo:-num_halo],
+                   -p.rot_halo_bottom(),
+                   axes=(2,1))
+    
+    #bottom_halo_int = bottom_halo.astype(int)
+    #assert np.all(np.isclose(bottom_halo, bottom_halo_int, 1e-5)) and \
+    #       np.all(np.diff(bottom_halo, axis=1) > 0) and \
+    #       np.all(np.diff(bottom_halo, axis=2) > 0),  'Bottom halo exchange on tile {}, rank {} faulty'.format(tile, rank)
+    assert check_halo(bottom_halo, p.bottom()), 'Bottom halo exchange on tile {}, rank {} faulty'.format(tile, rank)
+ #   print('rotate bottom: {}'.format(p.rot_halo_bottom()))
+    # Top halo:
+    top_halo = np.rot90(field[:, -num_halo:, num_halo:-num_halo],
+                   -p.rot_halo_top(),
+                   axes=(2,1))
+    assert check_halo(top_halo, p.top()), 'Top halo exchange on tile {}, rank {} faulty'.format(tile, rank)
+    #top_halo_int = top_halo.astype(int)
+   
+    #with np.printoptions(precision=3, suppress=True, linewidth=120): 
+    #    print(top_halo)
+    #print(top_halo_int)
+    #print(np.isclose(top_halo - p.top() / 1000, top_halo_int, 1e-4)) # and \
+    #       np.all(np.diff(top_halo, axis=1) > 0) and \
+    #       np.all(np.diff(top_halo, axis=2) > 0),  'Top halo exchange on tile {}, rank {} faulty'.format(tile, rank)
+  #  print('rotate top: {}'.format(p.rot_halo_top()))
+    # Left halo:
+    left_halo = np.rot90(field[:, num_halo:-num_halo, :num_halo],
+                   -p.rot_halo_left(),
+                   axes=(2,1))
+    assert check_halo(left_halo, p.left()), 'Left halo exchange on tile {}, rank {} faulty'.format(tile, rank)
+    #left_halo_int = left_halo.astype(int)
+    #assert np.all(np.isclose(left_halo, left_halo_int, 1e-5)) and \
+    #       np.all(np.diff(left_halo, axis=1) > 0) and \
+    #       np.all(np.diff(left_halo, axis=2) > 0),  'Left halo exchange on tile {}, rank {} faulty'.format(tile, rank)
+   # print('rotate left: {}'.format(p.rot_halo_left()))
+    # Right halo:
+    right_halo = np.rot90(field[:, num_halo:-num_halo, -num_halo:],
+                   -p.rot_halo_right(),
+                   axes=(2,1))
+    assert check_halo(right_halo, p.right()), 'Right halo exchange on tile {}, rank {} faulty'.format(tile, rank)
+    #right_halo_int = bottom_halo.astype(int)
+  #  assert np.all(np.isclose(right_halo, right_halo_int, 1e-5)) and \
+  #         np.all(np.diff(right_halo, axis=1) > 0) and \
+  #         np.all(np.diff(right_halo, axis=2) > 0),  'Right halo exchange on tile {}, rank {} faulty'.format(tile, rank)
+   # print('rotate right: {}'.format(p.rot_halo_right()))
     # write to standard output if arrays small enough:
-    if field.size[1] < 13:
+    if field.shape[1] < 13:
         with np.printoptions(precision=3, suppress=True, linewidth=120):
-            print("global rank {}, tile {}, local rank {}: Subtile after one halo exchange:\n{}".format(rank, local_rank, p.tile(), np.flipud(out_field[0,:,:])))
+            print("global rank {}, local rank {}, tile {}: subtile after one halo exchange:\n{}\n".format(rank,
+                local_rank, p.tile(), np.flipud(field[0,:,:])))
     
 
 @click.command()
@@ -235,7 +291,8 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
         f = np.empty(1)
     in_field = p.scatter(f)
 
-    # to have a rank indication when inspecting fields for verification/diagnostics:
+    # add pattern increasing in steps of 100 in pos y-direction, steps of 1 in pos x-direction with
+    # rank encoded in the 3 decimal places right of the decimal separator
     if verify:
         local_ny, local_nx = in_field.shape[1:]
         test_grid = np.add(*np.mgrid[0:(local_ny - 2 * num_halo) * 100:100, 0:(local_nx - 2 * num_halo)]) + rank / 1e3 
@@ -286,10 +343,9 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
 
     # halo exchange correctness verification:
     if verify:
-        verify_halo_exchange(out_field, rank, num_halo, p)
-        comm.Barrier()
+        verify_halo_exchange(out_field, rank, local_rank, tile, num_halo, p)
         if rank == 0:
-            print(80 * '*' + '\n All halo exchange tests passed!\n' + 80 * '*')
+            print(80 * '*' + '\n Verification complete - all halo exchange tests passed!\n' + 80 * '*')
 
     # f = p.gather(out_field)
     # if local_rank == 0:
