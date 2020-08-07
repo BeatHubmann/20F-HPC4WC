@@ -1,7 +1,7 @@
 # ******************************************************
 #     Program: stencil3d
 #     Authors: Oliver Fuhrer, Beat Hubmann, Shruti Nath
-#        Date: July/August 2020
+#        Date: June-August 2020
 # Description: Simple stencil example on a cubed sphere
 # ******************************************************
 
@@ -45,18 +45,17 @@ def laplacian( in_field, lap_field, num_halo, extend=0 ):
     # fixing corners
     if extend > 0:
         # bottom-left
-        lap_field[:, jb, num_halo] += in_field[:, num_halo, ib] # lap_field(-1, 0) += in_field(0, -1)
-        lap_field[:, num_halo, ib] += in_field[:, jb, num_halo] # lap_field(0, -1) += in_field(-1, 0)
+        lap_field[:, jb, num_halo] += in_field[:, num_halo, ib] # lap_field(-1, 0) += in_field( 0,-1)
+        lap_field[:, num_halo, ib] += in_field[:, jb, num_halo] # lap_field( 0,-1) += in_field(-1, 0)
         # bottom-right
-        lap_field[:, jb, -num_halo] += in_field[:, num_halo, ie] 
-        lap_field[:, num_halo, ie] += in_field[:, jb, -num_halo] 
+        lap_field[:, jb, -num_halo] += in_field[:, num_halo, ie] # lap_field(-1, nx-1) += in_field( 0, nx  ) 
+        lap_field[:, num_halo, ie] += in_field[:, jb, -num_halo] # lap_field( 0, nx  ) += in_field(-1, nx-1)  
         # top-left
-        lap_field[:, je, num_halo] += in_field[:, -num_halo, ib] 
-        lap_field[:, -num_halo, ib] += in_field[:, je, num_halo] 
+        lap_field[:, je, num_halo] += in_field[:, -num_halo, ib] # lap_field(ny  , 0) += in_field(ny-1,-1) 
+        lap_field[:, -num_halo, ib] += in_field[:, je, num_halo] # lap_field(ny-1,-1) += in_field(ny  , 0)  
         # top-right
-        lap_field[:, je, -num_halo] += in_field[:, -num_halo, ie] 
-        lap_field[:, -num_halo, ie] += in_field[:, je, -num_halo] 
-
+        lap_field[:, je, -num_halo] += in_field[:, -num_halo, ie] # lap_field(ny  , nx-1) += in_field(ny-1, nx  )  
+        lap_field[:, -num_halo, ie] += in_field[:, je, -num_halo] # lap_field(ny-1, nx  ) += in_field(ny  , nx-1)   
 
 
 def update_halo( field, num_halo, p=None ):
@@ -69,9 +68,6 @@ def update_halo( field, num_halo, p=None ):
     """
 
     comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
-
-    # print("Updating halo - I am rank {} on tile {} - RANKS left: {} right: {} up: {} down {}".format(rank, p.tile(), p.left(), p.right(), p.top(), p.bottom()))
 
     reqs_recv, reqs_send = [], []
 
@@ -102,10 +98,6 @@ def update_halo( field, num_halo, p=None ):
     l_sndbuf = np.rot90(field[:, num_halo:-num_halo, num_halo:2 * num_halo],
                         p.rot_halo_left(),
                         axes=(1,2)).copy()
-   # if p.global_rank() == 4:
-   #      with np.printoptions(precision=5, suppress=True, linewidth=120):
-   #          # print("Left buffer data:\n{}".format(field[0, num_halo:-num_halo, num_halo:2 * num_halo])) 
-   #          print("l_sndbuf:\n{}".format(l_sndbuf[0]))
     reqs_send.append(p.comm().Isend(l_sndbuf, dest = p.left()))    
     r_sndbuf = np.rot90(field[:, num_halo:-num_halo, -2 * num_halo:-num_halo],
                         p.rot_halo_right(),
@@ -115,18 +107,12 @@ def update_halo( field, num_halo, p=None ):
     # wait and unpack
     for req in reqs_recv:
         req.wait()
-
     
     field[:,         0: num_halo, num_halo:-num_halo] = b_rcvbuf
     field[:, -num_halo:         , num_halo:-num_halo] = t_rcvbuf
     field[:,  num_halo:-num_halo,        0: num_halo] = l_rcvbuf
     field[:,  num_halo:-num_halo,-num_halo:         ] = r_rcvbuf
 
-  #  if p.global_rank() == 1:
-  #       with np.printoptions(precision=5, suppress=True, linewidth=120):
-  #           # print("Left buffer data:\n{}".format(field[0, num_halo:-num_halo, num_halo:2 * num_halo])) 
-  #           print("r_rcvbuf:\n{}".format(r_rcvbuf[0]))
-  #           print("inserted:\n{}".format( field[0,  num_halo:-num_halo,-num_halo:]))
     # wait for sends to complete
     for req in reqs_send:
         req.wait()
@@ -151,28 +137,16 @@ def apply_diffusion( in_field, out_field, alpha, num_halo, num_iter=1, p=None ):
         update_halo( in_field, num_halo, p )
         
         laplacian( in_field, tmp_field, num_halo=num_halo, extend=1 )
-        # update_halo( tmp_field, num_halo, p )
         laplacian( tmp_field, out_field, num_halo=num_halo, extend=0 )
 
         # DEBUG:
         if p.global_rank() == 0 and n % 10 == 0:
             with np.printoptions(precision=3, suppress=True, linewidth=120):
-                # print(np.flipud(in_field[0]))
                 print('Max in_field = {} at {}'.format(np.amax(in_field[0]), np.where(in_field[0] == np.amax(in_field[0]))))
-            # print('Max tmp_field = {} at {}'.format(np.amax(tmp_field[0]), np.where(tmp_field[0] == np.amax(tmp_field[0]))))
-            # print('Max out_field = {} at {}'.format(np.amax(out_field[0]), np.where(out_field[0] == np.amax(out_field[0]))))
-
 
         out_field[:, num_halo:-num_halo, num_halo:-num_halo] = \
             in_field[:, num_halo:-num_halo, num_halo:-num_halo] \
             - alpha * out_field[:, num_halo:-num_halo, num_halo:-num_halo]
-
-        # DEBUG:
-        # if p.global_rank() == 0:
-        #     if n % 10 == 0:
-        #         print('Max post alpha out_field = {} at {}'.format(np.amax(out_field[0]), np.where(out_field[0] == np.amax(out_field[0]))))
-        #         print(20*'-')
-        
         
         if n < num_iter - 1:
             in_field, out_field = out_field, in_field
@@ -181,11 +155,6 @@ def apply_diffusion( in_field, out_field, alpha, num_halo, num_iter=1, p=None ):
 def check_halo(halo, neighbor, tolerance=1e-4):
     """Checks if halo originates from neighbor and its proper orientation in y- and x-axis""" 
     halo_int = halo.astype(int)
-   # print(halo)
-   # print(halo_int)
-   # print(np.all(np.isclose(halo - neighbor / 1000, halo_int, tolerance)))
-   # print(np.all(np.diff(halo, axis=1) > 0)) 
-   # print(np.all(np.diff(halo, axis=2) > 0))
     return np.all(np.isclose(halo - neighbor / 1000, halo_int, tolerance)) and \
            np.all(np.diff(halo, axis=1) > 0) and \
            np.all(np.diff(halo, axis=2) > 0)
@@ -193,52 +162,28 @@ def check_halo(halo, neighbor, tolerance=1e-4):
 
 def verify_halo_exchange(field, rank, local_rank, tile, num_halo, p):
     """Checks halo correctness after initial halo exchange during verification"""
-    # Bottom halo:
+    # bottom halo:
     bottom_halo = np.rot90(field[:, :num_halo, num_halo:-num_halo],
                    -p.rot_halo_bottom(),
                    axes=(2,1))
-    
-    #bottom_halo_int = bottom_halo.astype(int)
-    #assert np.all(np.isclose(bottom_halo, bottom_halo_int, 1e-5)) and \
-    #       np.all(np.diff(bottom_halo, axis=1) > 0) and \
-    #       np.all(np.diff(bottom_halo, axis=2) > 0),  'Bottom halo exchange on tile {}, rank {} faulty'.format(tile, rank)
     assert check_halo(bottom_halo, p.bottom()), 'Bottom halo exchange on tile {}, rank {} faulty'.format(tile, rank)
- #   print('rotate bottom: {}'.format(p.rot_halo_bottom()))
-    # Top halo:
+    # top halo:
     top_halo = np.rot90(field[:, -num_halo:, num_halo:-num_halo],
                    -p.rot_halo_top(),
                    axes=(2,1))
     assert check_halo(top_halo, p.top()), 'Top halo exchange on tile {}, rank {} faulty'.format(tile, rank)
-    #top_halo_int = top_halo.astype(int)
-   
-    #with np.printoptions(precision=3, suppress=True, linewidth=120): 
-    #    print(top_halo)
-    #print(top_halo_int)
-    #print(np.isclose(top_halo - p.top() / 1000, top_halo_int, 1e-4)) # and \
-    #       np.all(np.diff(top_halo, axis=1) > 0) and \
-    #       np.all(np.diff(top_halo, axis=2) > 0),  'Top halo exchange on tile {}, rank {} faulty'.format(tile, rank)
-  #  print('rotate top: {}'.format(p.rot_halo_top()))
-    # Left halo:
+    # left halo:
     left_halo = np.rot90(field[:, num_halo:-num_halo, :num_halo],
                    -p.rot_halo_left(),
                    axes=(2,1))
     assert check_halo(left_halo, p.left()), 'Left halo exchange on tile {}, rank {} faulty'.format(tile, rank)
-    #left_halo_int = left_halo.astype(int)
-    #assert np.all(np.isclose(left_halo, left_halo_int, 1e-5)) and \
-    #       np.all(np.diff(left_halo, axis=1) > 0) and \
-    #       np.all(np.diff(left_halo, axis=2) > 0),  'Left halo exchange on tile {}, rank {} faulty'.format(tile, rank)
-   # print('rotate left: {}'.format(p.rot_halo_left()))
-    # Right halo:
+    # right halo:
     right_halo = np.rot90(field[:, num_halo:-num_halo, -num_halo:],
                    -p.rot_halo_right(),
                    axes=(2,1))
     assert check_halo(right_halo, p.right()), 'Right halo exchange on tile {}, rank {} faulty'.format(tile, rank)
-    #right_halo_int = bottom_halo.astype(int)
-  #  assert np.all(np.isclose(right_halo, right_halo_int, 1e-5)) and \
-  #         np.all(np.diff(right_halo, axis=1) > 0) and \
-  #         np.all(np.diff(right_halo, axis=2) > 0),  'Right halo exchange on tile {}, rank {} faulty'.format(tile, rank)
-   # print('rotate right: {}'.format(p.rot_halo_right()))
-    # write to standard output if arrays small enough:
+
+    # write to standard output for visual diagnostics if arrays small enough:
     if field.shape[1] < 13:
         with np.printoptions(precision=3, suppress=True, linewidth=120):
             print("global rank {}, local rank {}, tile {}: subtile after one halo exchange:\n{}\n".format(rank,
@@ -252,7 +197,7 @@ def verify_halo_exchange(field, rank, local_rank, tile, num_halo, p):
 @click.option('--num_iter', type=int, required=True, help='Number of iterations')
 @click.option('--num_halo', type=int, default=2, help='Number of halo-pointers in x- and y-direction')
 @click.option('--plot_result', type=bool, default=False, help='Make a plot of the result?')
-@click.option('--verify', type=bool, default=False, help='Output verification plots? No diffusion, overrides plot_result option')
+@click.option('--verify', type=bool, default=False, help='Output verification plots? No diffusion, overrides num_iter, plot_result options')
 def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
     """Driver for apply_diffusion that sets up fields and does timings"""
     
@@ -300,20 +245,6 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
 
     out_field = np.copy( in_field )
 
-    f = p.gather(in_field)
-   
-    if local_rank == 0:
-      #  if rank == 0:
-      #      with np.printoptions(precision=5, suppress=True, linewidth=120):
-      #          print("in f:\n{}".format(np.flipud(f[0,:,:])))
-        np.save('global_in_field_{}{}'.format(tile, '_verify' if verify else ''), f)
-        if plot_result or verify:
-            plt.ioff()
-            plt.imshow(f[in_field.shape[0] // 2, :, :], origin='lower')
-            plt.colorbar()
-            plt.savefig('global_in_field_{}{}.png'.format(tile, '_verify' if verify else ''))
-            plt.close()
-
     if plot_result or verify:
         np.save('local_in_field_{}-{}_{}{}'.format(tile, local_rank, rank, '_verify' if verify else ''), in_field)
         plt.ioff()
@@ -347,27 +278,13 @@ def main(nx, ny, nz, num_iter, num_halo=2, plot_result=False, verify=False):
         if rank == 0:
             print(80 * '*' + '\n Verification complete - all halo exchange tests passed!\n' + 80 * '*')
 
-    # f = p.gather(out_field)
-    # if local_rank == 0:
-    #     if rank == 0:
-    #         with np.printoptions(precision=5, suppress=True, linewidth=120):
-    #             print("out f:\n{}".format(np.flipud(f[0,:,:])))
-    #     np.save('out_field_{}{}'.format(tile, '_verify' if verify else ''), f)
-    #     if plot_result or verify:
-    #         if verify:
-    #             plt.imshow(f[out_field.shape[0] // 2, :, :], origin='lower')
-    #         else:
-    #             plt.imshow(f[out_field.shape[0] // 2, num_halo:-num_halo, num_halo:-num_halo], origin='lower')
-    #         plt.colorbar()
-    #         plt.savefig('out_field_{}{}.png'.format(tile, '_verify' if verify else ''))
-    #         plt.close()
-
-    if plot_result:
-        np.save('local_out_field_{}-{}_{}'.format(tile, local_rank, rank), out_field[:, num_halo:-num_halo, num_halo:-num_halo])
+    if plot_result or verify:
+        np.save('local_out_field_{}-{}_{}{}'.format(tile, local_rank, rank, '_verify' if verify else ''),
+                out_field[:, num_halo:-num_halo, num_halo:-num_halo])
         plt.ioff()
         plt.imshow(out_field[out_field.shape[0] // 2, num_halo:-num_halo, num_halo:-num_halo], origin='lower')
         plt.colorbar()
-        plt.savefig('local_out_field_{}-{}_{}'.format(tile, local_rank, rank))
+        plt.savefig('local_out_field_{}-{}_{}{}'.format(tile, local_rank, rank, '_verify' if verify else ''))
         plt.close()
 
 
