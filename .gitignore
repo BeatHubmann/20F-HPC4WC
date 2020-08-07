@@ -23,7 +23,6 @@ ipython_config.py
 *.log
 *.lot
 *.fls
-*.out
 *.toc
 *.fmt
 *.fot
@@ -40,7 +39,7 @@ ipython_config.py
 # *.eps
 # *.pdf
 
-## Generated if empty string is given at "Please type another file name for output:"
+## Generated if empty string is given at "Please type another file name for put:"
 .pdf
 
 ## Bibliography auxiliary files (bibtex/biblatex/biber):
@@ -61,7 +60,7 @@ ipython_config.py
 
 ## Build tool directories for auxiliary files
 # latexrun
-latex.out/
+latex./
 
 ## Auxiliary and intermediate files from other packages:
 # algorithms
@@ -205,7 +204,7 @@ _minted*
 *.wrt
 
 # sympy
-*.sout
+*.s
 *.sympy
 sympy-plots-for-*.tex/
 
@@ -247,7 +246,7 @@ pythontex-files-*/
 # xindy
 *.xdy
 
-# xypic precompiled matrices and outlines
+# xypic precompiled matrices and lines
 *.xyc
 *.xyd
 
@@ -518,3 +517,6 @@ $RECYCLE.BIN/
 .history
 
 # End of https://www.toptal.com/developers/gitignore/api/linux,python,macos,windows,jupyternotebooks,latex
+
+# slurm error output files
+*.err
