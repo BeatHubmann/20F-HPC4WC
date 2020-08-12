@@ -1,7 +1,7 @@
 # 20F-HPC4WC
 Final project for the course [High Performance Computing for Weather and Climate](http://vvz.ethz.ch/Vorlesungsverzeichnis/lerneinheit.view?lerneinheitId=138658&semkez=2020S&ansicht=KATALOGDATEN&lang=de), FS2020 @ETHZ
 
-## Project: Stencil on a sphere
+## Project: Implementing a Diffusion Stencil on a Sphere using MPI
 
 ### Task
 Extend an MPI stencil code from a rectangular domain to a cubed-sphere grid, allowing to run on a full sphere.
