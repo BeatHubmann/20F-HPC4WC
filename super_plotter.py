@@ -26,10 +26,10 @@ def main(field):
 		names_grouped = [ names[i:i + dims] for i in range(0, no_subtiles, dims) ]
 		
 		##Stack the grouped subtiles along the x-axis
-		temp_hstacked=[np.dstack(np.load(names_grouped[i][j])  for j in range(dims)) for i in range(dims)]
+		temp_hstacked=[np.dstack([np.load(names_grouped[i][j])  for j in range(dims) for i in range(dims)])]
 		
 		##Stack the x-axis slices along the y-axis
-		tiles[tile]=np.hstack(x_tile for x_tile in temp_hstacked)
+		tiles[tile]=np.hstack([x_tile for x_tile in temp_hstacked])
 	
 	##Get the unfolded cube dimensions for plotting
 	nz=tiles[1].shape[0]
